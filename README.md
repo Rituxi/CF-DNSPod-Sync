@@ -75,3 +75,20 @@ GitHub 仓库 Variables 填 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID
 Actions 不提供解除冻结功能。时钟 `DISPATCH_ENABLED` 只控制定时投递；关闭它不会解除冻结。需要主动排查链路时，可用专用令牌鉴权 `POST /dispatch`，只允许启动必须冻结的同步或探测，不需要临时增加 Cron。
 
 DNSPod 后台的更新时间是**记录最后修改时间**，不是任务检查时间。冻结或没有符合条件的新地址时，这个时间保持原值属于正常行为。用 `status` 的 `lastAuthoritativeCheckAt`、`lastProbeCompletedAt` 和每条记录的 `dnsUpdatedOn` 分别判断检查、测量和实际修改；不要为刷新显示时间反复写入同一地址。
+
+## 在 Cloudflare 连接 GitHub 自动部署
+
+一个仓库可以部署多个 Worker。分别打开下面两个**已有 Worker**的「设置 → 构建 → 连接 Git」，连接同一个 `Rituxi/CF-DNSPod-Sync` 仓库；首次连接需在面板授权 Cloudflare GitHub App，只为本次新增授权这个工具仓库。
+
+两个 Worker 均选择生产分支 `main`、仓库根目录 `/`、构建命令 `npm run check`。Node 版本由仓库 `.node-version` 固定为 24.22.1。部署命令分别填写：
+
+| 已有 Worker | 部署命令 |
+| --- | --- |
+| `cf-dnspod-actions-trigger` | `npx wrangler deploy --config wrangler.trigger.jsonc` |
+| `cf-ipv4-test` | `npx wrangler deploy --config wrangler.test.jsonc` |
+
+只开启生产分支自动部署，不启用其他分支的自动部署。保存连接后，用首次构建的成功记录确认配置生效；本节说明不表示云端连接已启用。使用当前 Workers Free 构建额度，不升级付费方案。
+
+推送到 `main` 后，Cloudflare 分别检查并发布两个 Worker。业务选址代码由 Actions 在下一次运行时从 `main` 取用，无需另建 Worker。继续只使用 Cloudflare 这一条 Worker 自动部署入口；Actions 保留业务任务和代码检查。
+
+Cloudflare 构建只需要部署权限，不要复制 Actions 中的 D1 或 DNSPod 密钥到构建环境。已有定时 Worker 的 `GITHUB_DISPATCH_TOKEN` 继续留在它的加密 Secret 中。公开范围包括代码、测试域名/IP 和白名单运行摘要；密钥、原始测量、本机文件及其他项目内容不随仓库公开。维护时继续检查新增文件和日志，避免手动输出密钥。
