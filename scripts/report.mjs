@@ -16,6 +16,8 @@ export function summarize(kind, result) {
       ({ target, checked, successful, carriers, completeCoverage, reportUrl })),
     countedSubrequests: result.countedSubrequests,
     stateUsage: result.stateUsage,
+    triggerSource: process.env.TRIGGER_SOURCE,
+    scheduledAt: process.env.SCHEDULED_AT || undefined,
   };
 }
 export async function outputResult(kind, result) {

@@ -1,6 +1,6 @@
 # Cloudflare 三网实测与 DNSPod 地址池
 
-GitHub Actions 运行现有 Node 入口，抓取候选、调度真实大陆三网探针、比较历史并按证据更新独立测试地址池 `pick.luro.qzz.io`。独立测试 Worker `cf-ipv4-test` 与工具 D1 `cf-dnspod-state` 保留在同一项目。正式业务服务不在本工具的操作范围。
+GitHub Actions 运行现有 Node 入口，抓取候选、调度真实大陆三网探针、比较历史并按证据更新独立测试地址池 `pick.luro.qzz.io`。一个轻量 Cloudflare 时钟只负责发 GitHub 启动请求，避免依赖本仓库尚未产生事件的 GitHub 原生定时入口。独立测试 Worker `cf-ipv4-test` 与工具 D1 `cf-dnspod-state` 保留在同一项目。正式业务服务不在本工具的操作范围。
 
 当前发布保持冻结。冻结期间仍抓取和测量，DNS 不更新。迁移进度和真实验证见[部署记录](docs/deployment-and-acceptance.md)。
 
@@ -10,10 +10,11 @@ GitHub Actions 运行现有 Node 入口，抓取候选、调度真实大陆三�
 | --- | --- | --- |
 | Actions `DNSPod sync` | 来源、候选、权威回读、历史决策、DNSPod 发布及验证；唯一自动 DNS 写入方 | 每小时 03、33 分 |
 | Actions `Three-carrier probe` | 通过 Globalping 调度大陆电信 AS4134、联通 AS4837、移动 AS9808，每家 3 个实际探针 | 每小时 10、25、40、55 分 |
+| `cf-dnspod-actions-trigger` | 一个 Cron、每次一个 GitHub API 请求；只启动上述两工作流，返回实际运行 ID | 03、10、25、33、40、55 分 |
 | `cf-ipv4-test` | `https://probe.luro.qzz.io/health` 固定 HTTPS 响应 | 无 Cron |
 | `cf-dnspod-state` | 权威快照、候选、近 48 小时报告、租约、冻结和切换审计 | 原有独立 D1 |
 
-半小时同步、15 分钟探测的频率不变；启动分钟整体后移 3 分钟，避开整点负载。两个旧后台 Worker 保留为停用备份，配置中 Cron 为空。Actions 通过 `ACTIONS_SCHEDULER_ENABLED=true` 接管调度；这一变量只启用调度，不解除 D1 中的发布冻结。
+半小时同步、15 分钟探测的频率不变；启动分钟整体后移 3 分钟，避开整点负载。两个旧后台 Worker 保留为停用备份，配置中 Cron 为空。业务工作流移除原生 `schedule`，只接收启动请求，避免日后原生定时恢复造成重复。时钟的 `DISPATCH_ENABLED` 只控制启动请求，不解除 D1 中的发布冻结；工作流名称显示“定时同步”“定时三网探测”或“定时链路验证”。
 
 GitHub 服务器只负责抓取网页、请求 API 和决策，测速始终发生在 Globalping 的真实大陆三网探针上。普通入口、当前 IP 和候选尽力复用同轮探针组，核对运营商和地区元数据；Globalping 不公开稳定节点 ID。
 
@@ -37,15 +38,15 @@ GitHub 服务器只负责抓取网页、请求 API 和决策，测速始终发�
 
 保留 10 秒测量预算、20 秒首次轮询等待、5 秒后续间隔及最多 20 次结果查询。D1 批量请求保持事务语义，首次完成结果先保存。工作流共用 concurrency 分组，运行中任务不被新任务取消；D1 租约与去重仍负责跨平台重叠保护。
 
-GitHub 定时任务可能延迟或丢弃，不保证准点；35 分钟快照和 6 小时证据时效不放宽。快照过期就跳过探测、保持 DNS，不补跑漏掉的时段。公开仓库连续 60 天无活动可能自动停用定时任务，需要维护者检查 Actions 状态并重新启用。详见 [GitHub 调度说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
+GitHub 原生定时曾没有生成运行事件，现改由轻量时钟调用 `workflow_dispatch`。GitHub runner 仍可能排队；35 分钟快照和 6 小时证据时效不放宽。快照过期就跳过探测、保持 DNS，不补跑漏掉的时段。启动请求不自动重试，结果不明时依靠下一周期和原 D1 去重恢复。摘要保留时钟时间与触发来源，可核查投递及排队延迟。手动/API 触发不依赖原生定时的 60 天活动规则。
 
-本仓库只用标准 `ubuntu-24.04` 托管 runner；[公开仓库标准 runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。每天计划 48 次同步、96 次探测，不受私有仓库每月 2,000 分钟配额约束。不使用付费大型 runner，不上传 artifacts、不启用缓存，避免额外存储用量；D1 和 Globalping 沿用原预算。公开日志只输出白名单摘要，完整测量保存在工具 D1。
+本仓库只用标准 `ubuntu-24.04` 托管 runner；[公开仓库标准 runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。每天计划 48 次同步、96 次探测，不受私有仓库每月 2,000 分钟配额约束。不使用付费大型 runner，不上传 artifacts、不启用缓存。时钟每天约 144 次调用、只占一个 Cron，低于 [Workers Free 的每天 10 万请求和 5 个 Cron](https://developers.cloudflare.com/workers/platform/limits/)，不抓网页、不读 D1、不签 DNS 请求、不轮询探测结果；实际 CPU 验证见部署记录。D1 和 Globalping 沿用原预算。公开日志只输出白名单摘要，完整测量保存在工具 D1。
 
 ## 配置与操作
 
 需要 Node.js 24.22.1（24 系列）、PowerShell 7。本机运行 `npm ci`、`npm run check`。
 
-Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`ACTIONS_SCHEDULER_ENABLED`。凭据只放 Actions Secrets：
+Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`。业务凭据放 Actions Secrets：
 
 | Secret | 用途 |
 | --- | --- |
@@ -54,6 +55,8 @@ Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`
 | `TENCENTCLOUD_SECRET_KEY` | 同一对 SecretKey |
 
 探测工作流只接收 D1 token，不接收腾讯云凭据。Cloudflare D1 token 的权限范围是选定账户，代码额外限制为配置的工具数据库；不要把业务数据库 ID 填入变量。腾讯云策略模板见 [dnspod-policy.json](docs/dnspod-policy.json)。不要将密钥贴到聊天、日志或仓库中。
+
+时钟另用一个仅限本仓库 `Actions: write` 的 GitHub fine-grained token，保存在它的 Cloudflare Secret `GITHUB_DISPATCH_TOKEN` 中；没有代码写入、DNS 或 D1 权限。可通过 `scripts/set-trigger-token.ps1` 隐藏输入到本机忽略目录。维护者需要在令牌到期前更新该 Secret，不能上传本机 GCM 的完整登录凭据。`POST /dispatch` 是用同一专用令牌鉴权的主动链路验证入口，只允许触发必须冻结的同步或探测。
 
 本机资源标识放在忽略文件 `.local/cloudflare-state.json`：`accountId`、`databaseId`、可选 `wranglerProfile`；也可设置同名用途的环境变量 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`WRANGLER_PROFILE`。本机 D1 可用现有 Wrangler profile 登录；Actions 只使用 API Token。腾讯云本机凭据仍由 `scripts/set-credentials.ps1` 隐藏输入并保存到忽略目录。
 
@@ -68,6 +71,6 @@ Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`
 | `npm run freeze` | 开启发布冻结；不停止测量 |
 | `npm run resume` | 仅维护者明确决定后手动解除冻结 |
 
-Actions 不提供解除冻结功能。定时任务开关与发布冻结彼此独立。部署独立测试 Worker 使用 `npm run deploy:test`；`npm run deploy:dry-run` 验证三个保留入口可构建。部署脚本把本机标识填入忽略的临时配置，后台配置不再设置 Cron。
+Actions 不提供解除冻结功能。时钟开关与发布冻结彼此独立。部署独立测试 Worker 使用 `npm run deploy:test`，部署时钟使用 `npm run deploy:trigger`；`npm run deploy:dry-run` 验证四个入口可构建。部署脚本把本机标识填入忽略的临时配置，两个旧后台配置不再设置 Cron。
 
-跨平台切换前必须按顺序完成来源、只读、冻结全流程验证，再启用 Actions 调度并清空两个旧后台 Cron，检查回读。回退时先关闭 Actions 调度，确认无在途任务，再按本机备份恢复旧 Cron；这会重新引入原 Worker CPU 与来源风险。不要同时长期启用两套调度。
+切换前必须按顺序完成来源、只读、冻结全流程及“时钟→Actions→D1”主动链路验证，再启用时钟并检查两个旧后台 Cron 为空。回退时先关闭时钟 Cron、确认无在途任务，再按本机备份恢复旧 Cron；这会重新引入原 Worker CPU 与来源风险。不要同时长期启用两套调度。

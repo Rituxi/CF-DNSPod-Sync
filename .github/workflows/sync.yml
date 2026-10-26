@@ -1,8 +1,6 @@
 name: DNSPod sync
+run-name: "${{ inputs.trigger_source == 'cloudflare-cron' && '定时同步' || inputs.trigger_source == 'clock-validation' && '定时链路验证：同步' || '手动同步' }} · ${{ inputs.mode || 'apply' }}"
 on:
-  schedule:
-    # UTC minutes 03 and 33; range/step form keeps the existing cadence.
-    - cron: '3-59/30 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -10,6 +8,14 @@ on:
         type: choice
         options: [observe, plan, frozen, apply]
         default: plan
+      trigger_source:
+        description: 'Clock source; the worker supplies this automatically'
+        type: choice
+        options: [manual, cloudflare-cron, clock-validation]
+        default: manual
+      scheduled_at:
+        description: 'UTC clock timestamp for tracing delivery delay'
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -17,7 +23,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   sync:
-    if: github.event_name == 'workflow_dispatch' || vars.ACTIONS_SCHEDULER_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
@@ -32,6 +37,8 @@ jobs:
         run: node scripts/actions-sync.mjs
         env:
           RUN_MODE: ${{ inputs.mode || 'apply' }}
+          TRIGGER_SOURCE: ${{ inputs.trigger_source || 'manual' }}
+          SCHEDULED_AT: ${{ inputs.scheduled_at }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
