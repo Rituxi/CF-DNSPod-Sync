@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-dnspod-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "DNSPOD_DOMAIN": "pick.luro.qzz.io",
+    "DNSPOD_DOMAIN_ID": "100181956",
+    "SYNC_MODE": "sync"
+  },
+  "d1_databases": [{ "binding": "STATE", "database_name": "cf-dnspod-state", "database_id": "", "migrations_dir": "migrations" }],
+  "triggers": { "crons": [] },
+  "observability": { "enabled": true }
+}

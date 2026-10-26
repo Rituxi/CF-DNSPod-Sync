@@ -1,0 +1,38 @@
+name: DNSPod sync
+on:
+  schedule:
+    - cron: '3,33 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'observe: sources only; plan: read only; frozen: full sync requiring freeze; apply: normal sync'
+        type: choice
+        options: [observe, plan, frozen, apply]
+        default: plan
+permissions:
+  contents: read
+concurrency:
+  group: cf-dnspod-background
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || vars.ACTIONS_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --no-audit --no-fund
+      - name: Run existing Node sync entry
+        run: node scripts/actions-sync.mjs
+        env:
+          RUN_MODE: ${{ inputs.mode || 'apply' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+          TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}

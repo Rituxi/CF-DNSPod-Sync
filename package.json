@@ -1,0 +1,27 @@
+{
+  "name": "cf-dnspod-sync",
+  "version": "2.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "check": "tsc --noEmit && node --test tests/*.test.mjs",
+    "observe": "node --use-env-proxy run.mjs --observe",
+    "plan": "node --use-env-proxy run.mjs --plan",
+    "apply": "node --use-env-proxy run.mjs --apply",
+    "probe": "node --use-env-proxy probe.mjs",
+    "freeze": "node --use-env-proxy scripts/publication.mjs freeze",
+    "pause": "node --use-env-proxy scripts/publication.mjs freeze",
+    "resume": "node --use-env-proxy scripts/publication.mjs resume",
+    "status": "node --use-env-proxy scripts/publication.mjs status",
+    "deploy:dry-run": "node --use-env-proxy scripts/deploy.mjs sync --dry-run && node --use-env-proxy scripts/deploy.mjs test --dry-run && node --use-env-proxy scripts/deploy.mjs probe --dry-run",
+    "deploy": "node --use-env-proxy scripts/deploy.mjs sync",
+    "deploy:test": "node --use-env-proxy scripts/deploy.mjs test",
+    "deploy:probe": "node --use-env-proxy scripts/deploy.mjs probe",
+    "deploy:all": "npm run deploy:test && npm run deploy && npm run deploy:probe",
+    "logs": "wrangler tail cf-dnspod-sync --format json",
+    "logs:probe": "wrangler tail cf-dnspod-probe --format json"
+  },
+  "devDependencies": { "miniflare": "5.20261006.1-alpha", "typescript": "5.8.3", "wrangler": "4.149.0" },
+  "overrides": { "miniflare": { "undici": "7.30.1" } }
+}

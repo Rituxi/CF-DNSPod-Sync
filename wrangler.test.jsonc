@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-ipv4-test",
+  "main": "src/test-worker.ts",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "probe.luro.qzz.io", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cf-dnspod-probe",
+  "main": "src/probe-worker.ts",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "TARGET_RECORD": "pick.luro.qzz.io",
+    "HEALTH_URL": "https://probe.luro.qzz.io/health",
+    "PROBE_MODE": "observe"
+  },
+  "d1_databases": [{ "binding": "STATE", "database_name": "cf-dnspod-state", "database_id": "", "migrations_dir": "migrations" }],
+  "triggers": { "crons": [] },
+  "observability": { "enabled": true }
+}

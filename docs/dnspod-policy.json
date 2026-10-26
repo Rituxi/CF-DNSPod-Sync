@@ -1,0 +1,14 @@
+{
+  "version": "2.0",
+  "statement": [{
+    "effect": "allow",
+    "action": [
+      "dnspod:DescribeDomain",
+      "dnspod:DescribeRecordLineList",
+      "dnspod:DescribeRecordList",
+      "dnspod:DescribeRecord",
+      "dnspod:ModifyRecord"
+    ],
+    "resource": ["qcs::dnspod::uin/REPLACE_WITH_OWNER_UIN:domain/REPLACE_WITH_TOOL_DOMAIN_ID"]
+  }]
+}
