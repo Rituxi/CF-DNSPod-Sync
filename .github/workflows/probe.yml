@@ -1,7 +1,8 @@
 name: Three-carrier probe
 on:
   schedule:
-    - cron: '10,25,40,55 * * * *'
+    # UTC minutes 10, 25, 40 and 55; no catch-up or extra measurements.
+    - cron: '10-59/15 * * * *'
   workflow_dispatch:
     inputs:
       require_frozen:

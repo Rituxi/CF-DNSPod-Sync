@@ -1,7 +1,8 @@
 name: DNSPod sync
 on:
   schedule:
-    - cron: '3,33 * * * *'
+    # UTC minutes 03 and 33; range/step form keeps the existing cadence.
+    - cron: '3-59/30 * * * *'
   workflow_dispatch:
     inputs:
       mode:
