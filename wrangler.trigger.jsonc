@@ -5,7 +5,7 @@
   "compatibility_date": "2026-10-25",
   "workers_dev": true,
   "preview_urls": false,
-  "vars": { "DISPATCH_ENABLED": "false" },
-  "triggers": { "crons": [] },
+  "vars": { "DISPATCH_ENABLED": "true" },
+  "triggers": { "crons": ["3,10,25,33,40,55 * * * *"] },
   "observability": { "enabled": true }
 }

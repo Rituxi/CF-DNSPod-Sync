@@ -1,5 +1,5 @@
 // A clock and one GitHub API request only. All business work stays in Actions.
-export interface TriggerEnv { GITHUB_DISPATCH_TOKEN?: string; DISPATCH_ENABLED: string }
+export interface TriggerEnv { GITHUB_DISPATCH_TOKEN?: string; DISPATCH_ENABLED: string; CLOCK_VALIDATE_FROZEN_SYNC?: string }
 export type TriggerTask = "sync" | "probe";
 const REPOSITORY = "Rituxi/CF-DNSPod-Sync";
 export const TRIGGER_CRON = "3,10,25,33,40,55 * * * *";
@@ -33,6 +33,9 @@ export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduled
 }
 export async function onClock(event: { scheduledTime: number }, env: TriggerEnv, fetcher?: typeof fetch) {
   if (env.DISPATCH_ENABLED !== "true") return { status: "paused", dnsWrites: false };
+  if (env.CLOCK_VALIDATE_FROZEN_SYNC === "true") {
+    return dispatchTask(env, "sync", event.scheduledTime, { frozen: true, validation: true, fetcher });
+  }
   const task = dueTask(event.scheduledTime);
   if (!task) return { status: "held", reason: "not-a-configured-minute", dnsWrites: false };
   return dispatchTask(env, task, event.scheduledTime, { fetcher });

@@ -37,6 +37,16 @@ test("a scheduled tick makes one scoped API request and returns its actual run i
   assert.equal(calls, 1); assert.equal(result.runId, 123); assert.equal(result.dnsWrites, false);
 });
 
+test("a temporary clock delivery check can only start frozen sync and obeys pause", async () => {
+  const validation = { ...env, CLOCK_VALIDATE_FROZEN_SYNC: "true" };
+  const result = await onClock({ scheduledTime: at + 60000 }, validation, async (_url, options) => {
+    const { inputs } = JSON.parse(options.body);
+    assert.equal(inputs.mode, "frozen"); assert.equal(inputs.trigger_source, "clock-validation"); return Response.json(run);
+  });
+  assert.equal(result.task, "sync");
+  assert.equal((await onClock({ scheduledTime: at }, { ...validation, DISPATCH_ENABLED: "false" }, () => assert.fail("Paused clock must stay offline"))).status, "paused");
+});
+
 test("probe dispatch carries boolean freeze inputs and a separate validation source", async () => {
   for (const frozen of [true, false]) await dispatchTask(env, "probe", at, { frozen, validation: true, fetcher: async (_url, options) => {
     const { inputs } = JSON.parse(options.body);
