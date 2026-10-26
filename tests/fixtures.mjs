@@ -7,7 +7,8 @@ export const candidate = (line = "DEFAULT", extra = {}) => ({ ip: `104.16.0.${LI
   source: "v2rayssr", line, rank: 1, lossPercent: 0, latencyMs: 50, measuredAt: now - 60_000, ...extra });
 export const selections = () => LINES.map(line => ({ line: line.id, name: line.name, candidate: candidate(line.id) }));
 export const record = (index = 0, extra = {}) => ({ RecordId: 100 + index, Name: "@", Type: "A", Value: `104.16.0.${index + 1}`,
-  Line: dnsLines[index].Name, LineId: dnsLines[index].LineId, TTL: 600, Status: "ENABLE", Remark: DNS_CONFIG.owner, ...extra });
+  Line: dnsLines[index].Name, LineId: dnsLines[index].LineId, TTL: 600, Status: "ENABLE", Remark: DNS_CONFIG.owner,
+  UpdatedOn: "2026-10-25 20:00:00", ...extra });
 export const transition = () => record(0, { Type: "CNAME", Value: "ipv4.luro.qzz.io.", Remark: "" });
 export function v2html(rows = selections().map(selection => selection.candidate)) {
   const labels = { DEFAULT: "多线", CT: "电信", CU: "联通", CM: "移动" };
@@ -29,24 +30,22 @@ export function fixture(options = {}) {
       if (action === "DescribeDomain") result = { DomainInfo: { Domain: options.wrongDomain ? "other.example.com" : env.DNSPOD_DOMAIN, DomainId: Number(env.DNSPOD_DOMAIN_ID), Grade: "DP_FREE" } };
       else if (action === "DescribeRecordLineList") result = { LineList: options.lines ?? dnsLines };
       else if (action === "DescribeRecordList") result = { RecordList: options.truncated ? Array.from({ length: 100 }, () => record()) : records };
-      else if (action === "CreateRecord" || action === "ModifyRecord") {
+      else if (action === "ModifyRecord") {
         writeCount++;
-        const id = action === "CreateRecord" ? 200 + writeCount : body.RecordId;
+        const id = body.RecordId;
         writtenIds.add(id);
         const row = { RecordId: id, Name: body.SubDomain, Type: body.RecordType, Value: body.Value, Line: body.RecordLine,
-          LineId: body.RecordLineId, TTL: body.TTL, Status: body.Status, Remark: body.Remark ?? records.find(row => row.RecordId === id)?.Remark };
+          LineId: body.RecordLineId, TTL: body.TTL, Status: body.Status, Remark: body.Remark ?? records.find(row => row.RecordId === id)?.Remark,
+          UpdatedOn: "2026-10-25 21:00:00" };
         const index = records.findIndex(row => row.RecordId === id);
         if (index >= 0) records[index] = row; else records.push(row);
         result = { RecordId: id };
-      } else if (action === "ModifyRecordRemark") {
-        records.find(row => row.RecordId === body.RecordId).Remark = body.Remark;
-        result = {};
       } else if (action === "DescribeRecord") {
         const row = records.find(row => row.RecordId === body.RecordId);
         const attempts = writtenIds.has(row.RecordId) ? (readBackAttempts.get(row.RecordId) ?? 0) + 1 : 0;
         if (attempts) readBackAttempts.set(row.RecordId, attempts);
         result = { RecordInfo: { Id: row.RecordId, SubDomain: row.Name, RecordType: row.Type, Value: (options.badReadback && attempts) || (attempts && attempts <= (options.readBackFailures ?? 0)) ? "104.16.0.99" : options.preflightChange && !writeCount ? "104.16.0.98" : row.Value,
-          RecordLine: row.Line, RecordLineId: row.LineId, TTL: row.TTL, Enabled: row.Status === "ENABLE" ? 1 : 0, Remark: row.Remark } };
+          RecordLine: row.Line, RecordLineId: row.LineId, TTL: row.TTL, Enabled: row.Status === "ENABLE" ? 1 : 0, Remark: row.Remark, UpdatedOn: row.UpdatedOn } };
       } else throw new Error(`Unexpected action ${action}`);
       return Response.json({ Response: { ...result, RequestId: "request" } });
     }

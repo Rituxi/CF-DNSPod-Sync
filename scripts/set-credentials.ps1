@@ -10,4 +10,4 @@ $credentialValues = @{ TENCENTCLOUD_SECRET_ID = $secretIdValue.Trim(); TENCENTCL
 $credentialPath = Join-Path $credentialsDirectory 'dnspod-credentials.json'
 [System.IO.File]::WriteAllText($credentialPath, ($credentialValues | ConvertTo-Json), [System.Text.UTF8Encoding]::new($false))
 Remove-Variable secretIdValue,secretKeyValue,credentialValues
-Write-Host '密钥已保存在本项目忽略目录中。请回到聊天告诉我“已保存”，不要发送密钥。'
+Write-Host '密钥已保存在本项目忽略目录中，仅供本机命令使用。Actions 凭据请在仓库 Secrets 中配置。'

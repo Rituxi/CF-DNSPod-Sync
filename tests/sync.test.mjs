@@ -64,19 +64,21 @@ test("plan is read-only in DNS and state; cloud and CLI share the same measured 
     const allBefore = snapshot();
     const planned = await synchronize(env, { ...t.options, dryRun: true });
     assert.equal(planned.decisions.find(row => row.line === "CU").kind, "switch"); assert.equal(t.f.writeCount, 0);
+    assert.equal(planned.states.find(row => row.line === "CU").record.UpdatedOn, "2026-10-25 20:00:00");
     assert.equal(JSON.stringify(await t.d.store.lines()), before);
     assert.equal(snapshot(), allBefore);
     let saved = false;
     const result = await synchronize(env, { ...t.options, beforeApply: async plan => { assert.equal(t.f.writeCount, 0); assert.equal(plan.decisions.find(row => row.line === "CU").ip, planned.decisions.find(row => row.line === "CU").ip); saved = true; } });
     assert.equal(result.status, "updated"); assert.ok(saved); assert.equal(t.f.writeCount, 1); assert.ok(result.countedSubrequests <= 50);
+    assert.equal((await t.d.store.lines()).find(row => row.line === "CU").record.UpdatedOn, "2026-10-25 21:00:00");
     assert.ok(!t.f.calls.some(call => ["CreateRecord", "DeleteRecord", "ModifyRecordRemark"].includes(call.action)));
     const again = await synchronize(env, t.options); assert.equal(again.status, "held"); assert.equal(t.f.writeCount, 1);
   } finally { t.d.close(); }
 });
-test("freeze and observe keep collecting snapshots but never write; explicit ranking fallback cannot bypass freeze", async () => {
+test("freeze and observe keep collecting snapshots without DNS writes", async () => {
   const t = await setup({ frozen: true });
   try {
-    assert.equal((await synchronize(env, { ...t.options, manualRankedLine: "CU" })).dnsWrites, false);
+    assert.equal((await synchronize(env, t.options)).dnsWrites, false);
     await t.d.store.freeze(false, now);
     assert.equal((await synchronize({ ...env, SYNC_MODE: "observe" }, t.options)).dnsWrites, false);
     assert.equal((await t.d.store.lines()).length, 4); assert.equal(t.f.writeCount, 0);
@@ -163,8 +165,10 @@ test("publication preserves unrelated NS/TXT records and only modifies the quali
 test("API adapter still rejects another zone and deletion actions", async () => {
   const f = fixture(), client = new DnsPod(env, f.fetcher);
   await assert.rejects(client.call("DeleteRecord", { RecordId: 1 }), /scope/);
+  await assert.rejects(client.call("ModifyRecordRemark", { RecordId: 1, Remark: "new" }), /scope/);
   await assert.rejects(client.call("DescribeDomain", { Domain: "elsewhere.com" }), /overridden/);
-  await assert.rejects(client.call("CreateRecord", { SubDomain: "www", RecordType: "A", RecordLine: "默认", TTL: 600 }), /scope|four/);
+  await assert.rejects(client.call("CreateRecord", { SubDomain: "@", RecordType: "A", RecordLine: "默认", TTL: 600 }), /scope/);
+  await assert.rejects(client.call("ModifyRecord", { SubDomain: "www", RecordType: "A", RecordLine: "默认", TTL: 600 }), /four/);
   assert.throws(() => new DnsPod({ ...env, DNSPOD_DOMAIN: "production.example.com" }), /dedicated/);
 });
 test("freezing immediately before publication creates no poisoned attempt and resume can use valid evidence", async () => {
@@ -239,7 +243,8 @@ test("a crashed publication intent also invalidates old evidence after the lease
   const t = await setup();
   try {
     const state = t.states.find(state => state.line === "CU"), owner = await t.d.store.claimSync(now);
-    await t.d.store.beginSwitch(`CU:${state.version}:old-evidence:${state.candidates[0].ip}`, "CU", now, {}, owner);
+    assert.equal(await t.d.store.beginSwitch(`CU:${state.version}:old-evidence:${state.candidates[0].ip}`, "CU", now, {}, owner,
+      { roundIds: [1, 0].map(index => round(state, index).id), baselineVersion: state.version }), true);
     const result = await synchronize(env, { ...t.options, now: now + POLICY.leaseMs + 1 });
     assert.equal(t.f.writeCount, 0); assert.equal(result.decisions.find(row => row.line === "CU").kind, "hold");
     assert.notEqual((await t.d.store.lines()).find(row => row.line === "CU").version, state.version);

@@ -190,9 +190,9 @@ export class StateStore {
     return this.query(UNSETTLED_SWITCHES_SQL);
   }
   async beginSwitch(id: string, line: Line, now: number, body: unknown, owner: string,
-    evidence?: { roundIds: string[]; baselineVersion: string }): Promise<boolean> {
-    if (evidence && (evidence.roundIds.length !== POLICY.winsRequired || new Set(evidence.roundIds).size !== POLICY.winsRequired)) return false;
-    const roundIds = evidence ? JSON.stringify(evidence.roundIds) : null;
+    evidence: { roundIds: string[]; baselineVersion: string }): Promise<boolean> {
+    if (!evidence || evidence.roundIds.length !== POLICY.winsRequired || new Set(evidence.roundIds).size !== POLICY.winsRequired) return false;
+    const roundIds = JSON.stringify(evidence.roundIds);
     // Probe writes have a different lease. Check the latest complete pair at the
     // same atomic point as freeze/ownership and intent, rather than trusting a
     // report snapshot captured before asynchronous DNS/source reads.
@@ -200,12 +200,12 @@ export class StateStore {
       ["UPDATE tool_control SET sync_lease_until=? WHERE id=1 AND sync_owner=? AND sync_lease_until>? AND frozen=0 RETURNING id", [now + POLICY.leaseMs, owner, now]],
       [`INSERT OR IGNORE INTO switch_history(id,line,at,status,body) SELECT ?,?,?,'attempting',?
         WHERE EXISTS(SELECT 1 FROM tool_control WHERE id=1 AND sync_owner=? AND sync_lease_until>? AND frozen=0)
-        AND (? IS NULL OR (
+        AND (
           SELECT json_group_array(CASE WHEN status='measured' AND completed_at<=? AND baseline_version=? THEN id ELSE NULL END)
           FROM (SELECT id,status,completed_at,baseline_version FROM probe_rounds
             WHERE line=? AND started_at>=? ORDER BY started_at DESC LIMIT ?)
-        )=?) RETURNING id`,
-        [id, line, now, JSON.stringify(body), owner, now, roundIds, now, evidence?.baselineVersion ?? null,
+        )=? RETURNING id`,
+        [id, line, now, JSON.stringify(body), owner, now, now, evidence.baselineVersion,
           line, now - POLICY.evidenceMaxAgeMs, POLICY.winsRequired, roundIds]],
     ]);
     return results[1].results?.length === 1;

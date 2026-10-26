@@ -7,6 +7,8 @@ export function summarize(kind, result) {
     kind, at: result.at ?? result.fetchedAt ?? new Date(result.startedAt ?? Date.now()).toISOString(),
     status: result.status, reason: result.reason, strategy: result.strategy,
     frozen: result.frozen, publicationAllowed: result.publicationAllowed, dnsWrites: result.dnsWrites,
+    currentRecords: result.states?.map(({ line, record, fetchedAt }) => ({ line, ip: record.Value,
+      lastCheckedAt: new Date(fetchedAt).toISOString(), dnsUpdatedOn: record.UpdatedOn ?? null })),
     sources: result.sources, sourceError: result.sourceError,
     decisions: result.decisions?.map(({ line, kind, reason, ip, evidence }) => ({ line, kind, reason, ip, evidence })),
     outcomes: result.outcomes,

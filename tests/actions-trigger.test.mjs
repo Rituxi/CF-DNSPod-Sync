@@ -39,14 +39,9 @@ test("a scheduled tick makes one scoped API request and returns its actual run i
   assert.equal(calls, 1); assert.equal(result.runId, 123); assert.equal(result.dnsWrites, false);
 });
 
-test("a temporary clock delivery check can only start frozen sync and obeys pause", async () => {
-  const validation = { ...env, CLOCK_VALIDATE_FROZEN_SYNC: "true" };
-  const result = await onClock({ cron: "* * * * *", scheduledTime: at + 60000 }, validation, async (_url, options) => {
-    const { inputs } = JSON.parse(options.body);
-    assert.equal(inputs.mode, "frozen"); assert.equal(inputs.trigger_source, "clock-validation"); return Response.json(run);
-  });
-  assert.equal(result.task, "sync");
-  assert.equal((await onClock({ cron: "* * * * *", scheduledTime: at }, { ...validation, DISPATCH_ENABLED: "false" }, () => assert.fail("Paused clock must stay offline"))).status, "paused");
+test("retired temporary clock flags cannot enable high-frequency work", async () => {
+  const retired = { ...env, CLOCK_VALIDATE_FROZEN_SYNC: "true" };
+  assert.equal((await onClock({ cron: "* * * * *", scheduledTime: at }, retired, () => assert.fail("Retired diagnostics must stay offline"))).status, "held");
 });
 
 test("cron identity selects the right job even when its timestamp is early or delayed", async () => {

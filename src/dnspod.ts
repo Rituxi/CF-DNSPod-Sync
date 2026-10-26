@@ -28,7 +28,7 @@ async function signingKey(secretKey: string, date: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
-// Web Crypto works in both Node and Workers; no SDK or Node compatibility layer required.
+// Use Node's Web Crypto without a Tencent SDK dependency.
 export async function signRequest(secretId: string, secretKey: string, action: string, payload: string, timestamp: number, preparedKey?: CryptoKey) {
   const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
   const scope = `${date}/dnspod/tc3_request`;
@@ -55,10 +55,10 @@ export class DnsPod {
   }
 
   async call(action: string, params: Record<string, unknown> = {}): Promise<any> {
-    if (!["DescribeDomain", "DescribeRecordLineList", "DescribeRecordList", "DescribeRecord", "CreateRecord", "ModifyRecord", "ModifyRecordRemark"].includes(action)) throw new Error("DNSPod action outside tool scope");
+    if (!["DescribeDomain", "DescribeRecordLineList", "DescribeRecordList", "DescribeRecord", "ModifyRecord"].includes(action)) throw new Error("DNSPod action outside tool scope");
     if (!this.env.TENCENTCLOUD_SECRET_ID?.trim() || !this.env.TENCENTCLOUD_SECRET_KEY?.trim()) throw new Error("Missing Tencent Cloud API credentials; run scripts/set-credentials.ps1 locally");
     if (Object.hasOwn(params, "Domain") || Object.hasOwn(params, "DomainId")) throw new Error("DNSPod domain cannot be overridden");
-    if (["CreateRecord", "ModifyRecord"].includes(action) && (params.SubDomain !== "@" || params.RecordType !== "A" ||
+    if (action === "ModifyRecord" && (params.SubDomain !== "@" || params.RecordType !== "A" ||
       !LINES.some(line => line.name === params.RecordLine) || params.TTL !== DNS_CONFIG.ttl)) throw new Error("Write outside the four dedicated A records");
     const payload = JSON.stringify({ ...params, Domain: this.env.DNSPOD_DOMAIN });
     const timestamp = Math.floor(this.now() / 1000), date = new Date(timestamp * 1000).toISOString().slice(0, 10);
@@ -106,6 +106,7 @@ export class DnsPod {
     const row = (await this.call("DescribeRecord", { RecordId: recordId })).RecordInfo;
     if (!row || row.Id !== recordId) throw new Error("DNSPod read-back record ID mismatch");
     return { RecordId: row.Id, Name: row.SubDomain, Type: row.RecordType, Value: row.Value,
-      Line: row.RecordLine, LineId: row.RecordLineId, TTL: row.TTL, Status: row.Enabled === 1 ? "ENABLE" : "DISABLE", Remark: row.Remark };
+      Line: row.RecordLine, LineId: row.RecordLineId, TTL: row.TTL, Status: row.Enabled === 1 ? "ENABLE" : "DISABLE",
+      Remark: row.Remark, UpdatedOn: row.UpdatedOn };
   }
 }

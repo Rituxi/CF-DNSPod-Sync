@@ -6,4 +6,4 @@ $localDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) '.local'
 New-Item -ItemType Directory -Path $localDirectory -Force | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $localDirectory 'github-actions-trigger-token.txt'), $tokenValue.Trim(), [System.Text.UTF8Encoding]::new($false))
 Remove-Variable tokenValue
-Write-Host '已保存到忽略目录。请回复“已保存”或提供本机文件路径，不要把令牌发到聊天中。'
+Write-Host '已保存到本项目忽略目录。下一步运行 npm run trigger:token 验证权限并更新时钟 Secret。'

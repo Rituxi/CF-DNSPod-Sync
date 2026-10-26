@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { cfRequest } from "./cloudflare-api.mjs";
 import { ACCOUNT, DATABASE_ID, requireStateScope } from "./resources.mjs";
-export async function loadConfig(name = "wrangler.jsonc") {
-  const config = JSON.parse(await readFile(new URL(`../${name}`, import.meta.url), "utf8"));
-  if (ACCOUNT) config.account_id = ACCOUNT;
-  for (const binding of config.d1_databases ?? []) if (binding.binding === "STATE" && DATABASE_ID) binding.database_id = DATABASE_ID;
-  return config;
+export async function loadRuntime(kind = "sync") {
+  if (!["sync", "probe"].includes(kind)) throw new Error("Choose the sync or probe Node runtime");
+  const config = JSON.parse(await readFile(new URL("../runtime.json", import.meta.url), "utf8"));
+  return { vars: config[kind], database: { name: config.database.name, accountId: ACCOUNT, id: DATABASE_ID } };
 }
 export async function credentials() {
   if (process.env.TENCENTCLOUD_SECRET_ID && process.env.TENCENTCLOUD_SECRET_KEY) return {
@@ -18,9 +17,18 @@ export async function credentials() {
   catch { throw new Error("No local Tencent credentials. Run: pwsh -File scripts/set-credentials.ps1"); }
 }
 export function remoteState(config, request = cfRequest, scope) {
-  const path = requireStateScope(config, scope);
-  const usage = { requests: 0, rowsRead: 0, rowsWritten: 0 };
+  const path = requireStateScope(config.database, scope);
+  const usage = { requests: 0, metadataRequests: 0, rowsRead: 0, rowsWritten: 0 };
+  let identity;
+  const verifyIdentity = () => identity ??= (async () => {
+    usage.requests++; usage.metadataRequests++;
+    const database = await request(path.slice(0, -"/query".length));
+    if (database?.uuid !== config.database.id || database.name !== config.database.name) {
+      throw new Error("Configured D1 is not the dedicated tool state database; no SQL was sent");
+    }
+  })();
   const account = results => {
+    if (!Array.isArray(results)) throw new Error("Dedicated state response is not an array");
     for (const result of results ?? []) {
       usage.rowsRead += result.meta?.rows_read ?? 0;
       usage.rowsWritten += result.meta?.rows_written ?? 0;
@@ -28,6 +36,7 @@ export function remoteState(config, request = cfRequest, scope) {
     return results;
   };
   const query = async (sql, params) => {
+    await verifyIdentity();
     usage.requests++;
     const results = account(await request(path, { method: "POST", body: { sql, params } }));
     if (!results?.[0] || results.some(result => result.success === false)) throw new Error("Dedicated state query failed");
@@ -40,6 +49,7 @@ export function remoteState(config, request = cfRequest, scope) {
         all() { return query(this.sql, this.values); }, run() { return query(this.sql, this.values); } };
     },
     async batch(statements) {
+      await verifyIdentity();
       usage.requests++;
       const results = account(await request(path, { method: "POST", body: { batch: statements.map(statement => ({ sql: statement.sql, params: statement.values })) } }));
       if (!Array.isArray(results) || results.length !== statements.length || results.some(result => result.success === false)) throw new Error("Dedicated state transaction failed");

@@ -1,17 +1,11 @@
 // A clock and one GitHub API request only. All business work stays in Actions.
-export interface TriggerEnv { GITHUB_DISPATCH_TOKEN?: string; DISPATCH_ENABLED: string; CLOCK_VALIDATE_FROZEN_SYNC?: string }
+export interface TriggerEnv { GITHUB_DISPATCH_TOKEN?: string; DISPATCH_ENABLED: string }
 export type TriggerTask = "sync" | "probe";
 const REPOSITORY = "Rituxi/CF-DNSPod-Sync";
 export const CLOCK_CRONS = { sync: "3,33 * * * *", probe: "10,25,40,55 * * * *" } as const;
-export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduledTime: number,
-  options: { frozen?: boolean; validation?: boolean; fetcher?: typeof fetch } = {}) {
+export async function requestDispatch(token: string, task: TriggerTask, inputs: Record<string, string | boolean>, fetcher: typeof fetch = fetch) {
   if (!["sync", "probe"].includes(task)) throw new Error("Unsupported trigger task");
-  const token = env.GITHUB_DISPATCH_TOKEN?.trim();
-  if (!token) throw new Error("Missing repository-scoped GitHub Actions trigger token");
-  const scheduledAt = new Date(scheduledTime).toISOString();
-  const inputs = { trigger_source: options.validation ? "clock-validation" : "cloudflare-cron", scheduled_at: scheduledAt,
-    ...(task === "sync" ? { mode: options.frozen ? "frozen" : "apply" } : { require_frozen: !!options.frozen }) };
-  const response = await (options.fetcher ?? fetch)(`https://api.github.com/repos/${REPOSITORY}/actions/workflows/${task}.yml/dispatches`, {
+  const response = await fetcher(`https://api.github.com/repos/${REPOSITORY}/actions/workflows/${task}.yml/dispatches`, {
     method: "POST", redirect: "manual", signal: AbortSignal.timeout(15000),
     headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-type": "application/json",
       "x-github-api-version": "2026-03-10", "user-agent": "cf-dnspod-actions-trigger/1.0" },
@@ -23,14 +17,22 @@ export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduled
     result.html_url !== `https://github.com/${REPOSITORY}/actions/runs/${result.workflow_run_id}`) {
     throw new Error("GitHub accepted a dispatch but its run identity was not verified; no automatic retry");
   }
+  return { runId: result.workflow_run_id, runUrl: result.html_url };
+}
+export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduledTime: number,
+  options: { frozen?: boolean; validation?: boolean; fetcher?: typeof fetch } = {}) {
+  if (!["sync", "probe"].includes(task)) throw new Error("Unsupported trigger task");
+  const token = env.GITHUB_DISPATCH_TOKEN?.trim();
+  if (!token) throw new Error("Missing repository-scoped GitHub Actions trigger token");
+  const scheduledAt = new Date(scheduledTime).toISOString();
+  const inputs = { trigger_source: options.validation ? "clock-validation" : "cloudflare-cron", scheduled_at: scheduledAt,
+    ...(task === "sync" ? { mode: options.frozen ? "frozen" : "apply" } : { require_frozen: !!options.frozen }) };
+  const result = await requestDispatch(token, task, inputs, options.fetcher);
   return { status: "dispatched", task, scheduledAt, triggerSource: inputs.trigger_source,
-    runId: result.workflow_run_id, runUrl: result.html_url, dnsWrites: false };
+    ...result, dnsWrites: false };
 }
 export async function onClock(event: { cron: string; scheduledTime: number }, env: TriggerEnv, fetcher?: typeof fetch) {
   if (env.DISPATCH_ENABLED !== "true") return { status: "paused", dnsWrites: false };
-  if (env.CLOCK_VALIDATE_FROZEN_SYNC === "true") {
-    return dispatchTask(env, "sync", event.scheduledTime, { frozen: true, validation: true, fetcher });
-  }
   // Route by the expression supplied by Cloudflare, not a timestamp that may be
   // shifted by delivery jitter or an explicitly chosen diagnostic time.
   const task = event.cron === CLOCK_CRONS.sync ? "sync" : event.cron === CLOCK_CRONS.probe ? "probe" : null;

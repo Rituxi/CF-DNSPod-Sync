@@ -13,8 +13,13 @@ import { remoteState } from "../scripts/runtime.mjs";
 import { decideLine } from "../src/selection.ts";
 
 const cliScope = { accountId: "a".repeat(32), databaseId: "11111111-1111-4111-8111-111111111111" };
-const cliConfig = { account_id: cliScope.accountId,
-  d1_databases: [{ binding: "STATE", database_name: "cf-dnspod-state", database_id: cliScope.databaseId }] };
+const cliConfig = { database: { accountId: cliScope.accountId, name: "cf-dnspod-state", id: cliScope.databaseId } };
+
+async function publicationEvidence(store) {
+  const state = lineState(), rounds = [0, 1].map(index => round(state, index));
+  await seed(store, allStates(), rounds);
+  return { roundIds: rounds.reverse().map(item => item.id), baselineVersion: state.version };
+}
 
 test("state and first failures survive closing/reopening SQLite across Cron instances", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "cf-dnspod-test-"));
@@ -49,14 +54,16 @@ test("publication attempts are unique, frozen writes stay blocked, and only 48-h
   const d = database();
   try {
     assert.equal((await d.store.control()).frozen, 1);
-    await d.store.freeze(false, now); assert.equal((await d.store.control()).frozen, 0);
+    const evidence = await publicationEvidence(d.store); assert.equal((await d.store.control()).frozen, 0);
     const owner = await d.store.claimSync(now);
-    assert.equal(await d.store.beginSwitch("one", "CU", now, {}, owner), true);
-    assert.equal(await d.store.beginSwitch("one", "CU", now, {}, owner), false);
+    assert.equal(await d.store.beginSwitch("missing-evidence", "CU", now, {}, owner), false);
+    assert.equal(await d.store.beginSwitch("one-round", "CU", now, {}, owner, { ...evidence, roundIds: evidence.roundIds.slice(0, 1) }), false);
+    assert.equal(await d.store.beginSwitch("one", "CU", now, {}, owner, evidence), true);
+    assert.equal(await d.store.beginSwitch("one", "CU", now, {}, owner, evidence), false);
     await d.store.finishSwitch("one", "verified", { ok: true });
     await d.store.startRound(round(lineState(), 0, { startedAt: now - POLICY.retentionMs - 1, round: { id: "expired" } }), 36);
     await d.store.prune(now);
-    assert.equal(d.connection.prepare("SELECT COUNT(*) n FROM probe_rounds").get().n, 0);
+    assert.equal(d.connection.prepare("SELECT COUNT(*) n FROM probe_rounds WHERE id='expired'").get().n, 0);
   } finally { d.close(); }
 });
 test("decision reads keep only the latest two rounds per line and retain partial rounds that break streaks", async () => {
@@ -99,8 +106,9 @@ test("batched sync snapshot preserves decision evidence, partial streak breakers
     })));
     await seed(d.store, states, items);
     await d.store.freeze(false, now);
-    const owner = await d.store.claimSync(now);
-    assert.equal(await d.store.beginSwitch("CU:version-CU:interrupted", "CU", now, {}, owner), true);
+    // A pre-existing interrupted intent remains recoverable even after a later partial round.
+    d.connection.prepare("INSERT INTO switch_history(id,line,at,status,body) VALUES(?,?,?,'attempting','{}')")
+      .run("CU:version-CU:interrupted", "CU", now);
     await d.store.freeze(true, now);
     const expected = { control: await d.store.control(), lines: await d.store.lines(),
       rounds: await d.store.latestRounds(now), unsettled: await d.store.unsettledSwitches() };
@@ -163,7 +171,7 @@ test("projected decisions match full stored reports across four lines, failures,
 test("expired owners cannot release new leases, save snapshots or authorize DNS writes", async () => {
   const d = database();
   try {
-    await seed(d.store);
+    const evidence = await publicationEvidence(d.store);
     const first = await d.store.claimSync(now), later = now + POLICY.leaseMs + 1;
     const second = await d.store.claimSync(later); assert.notEqual(first, second);
     await d.store.releaseSync(first);
@@ -173,7 +181,7 @@ test("expired owners cannot release new leases, save snapshots or authorize DNS 
     await d.store.startRound(expired, 36);
     await assert.rejects(d.store.saveLines([lineState("CU", { version: "stale-owner" })], later, first, true), /lease/);
     assert.equal(d.connection.prepare("SELECT COUNT(*) n FROM probe_rounds WHERE id=?").get(expired.id).n, 1);
-    assert.equal(await d.store.beginSwitch("stale", "CU", later, {}, first), false);
+    assert.equal(await d.store.beginSwitch("stale", "CU", later, {}, first, evidence), false);
     assert.notEqual((await d.store.lines()).find(row => row.line === "CU").version, "stale-owner");
     const p1 = await d.store.claimRound(await d.store.control(), now, 36);
     const item = round(lineState(), 0, { round: { id: p1.id, status: "running" } });
@@ -225,10 +233,10 @@ test("snapshot save and retention pruning roll back together if either operation
 test("freeze includes any in-flight publication lease in the safe TTL window", async () => {
   const d = database();
   try {
-    await d.store.freeze(false, now); const owner = await d.store.claimSync(now);
+    const evidence = await publicationEvidence(d.store), owner = await d.store.claimSync(now);
     await d.store.freeze(true, now + 1000);
     assert.equal((await d.store.control()).frozen_at, now + POLICY.leaseMs);
-    assert.equal(await d.store.beginSwitch("frozen", "CU", now + 1000, {}, owner), false);
+    assert.equal(await d.store.beginSwitch("frozen", "CU", now + 1000, {}, owner, evidence), false);
     assert.equal(d.connection.prepare("SELECT COUNT(*) n FROM switch_history").get().n, 0);
   } finally { d.close(); }
 });
@@ -237,14 +245,15 @@ test("CLI transaction adapter rolls back audit and snapshot together on a real S
   try {
     const requests = [];
     const adapter = remoteState(cliConfig, async (path, request) => {
+      if (!path.endsWith("/query")) return { uuid: cliScope.databaseId, name: "cf-dnspod-state" };
       requests.push(request.body);
       assert.equal(path, `/accounts/${cliScope.accountId}/d1/database/${cliScope.databaseId}/query`);
       const items = request.body.batch ?? [request.body];
       return d.db.batch(items.map(item => d.db.prepare(item.sql).bind(...item.params)));
     }, cliScope);
-    const store = new StateStore(adapter); await seed(store);
+    const store = new StateStore(adapter), evidence = await publicationEvidence(store);
     const owner = await store.claimSync(now);
-    await store.beginSwitch("atomic", "CU", now, {}, owner);
+    assert.equal(await store.beginSwitch("atomic", "CU", now, {}, owner, evidence), true);
     d.connection.exec("CREATE TRIGGER reject_snapshot BEFORE UPDATE ON line_state BEGIN SELECT RAISE(ABORT,'snapshot failed'); END");
     await assert.rejects(store.completeSwitch("atomic", { verified: true }, lineState("CU", { version: "new" }), now, owner), /snapshot failed/);
     assert.equal(d.connection.prepare("SELECT status FROM switch_history WHERE id='atomic'").get().status, "attempting");
@@ -255,8 +264,8 @@ test("CLI transaction adapter rolls back audit and snapshot together on a real S
 test("CLI state adapter refuses a different account or a business database before making requests", async () => {
   const config = cliConfig;
   for (const changed of [
-    { ...config, account_id: "another-account" },
-    { ...config, d1_databases: [{ ...config.d1_databases[0], database_name: "other-database" }] },
-    { ...config, d1_databases: [{ ...config.d1_databases[0], database_id: "another-database" }] },
+    { database: { ...config.database, accountId: "another-account" } },
+    { database: { ...config.database, name: "other-database" } },
+    { database: { ...config.database, id: "another-database" } },
   ]) assert.throws(() => remoteState(changed, () => { assert.fail("Must not access another account/database"); }, cliScope), /dedicated tool state/);
 });

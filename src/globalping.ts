@@ -21,7 +21,7 @@ export class Globalping {
   constructor(fetcher: Fetcher, now = () => Date.now()) { this.fetcher = fetcher; this.now = now; }
   async request(path: string, init: RequestInit = {}, etag?: string): Promise<{ data?: any; etag?: string; notModified?: boolean }> {
     this.calls++;
-    // Workers' native fetch must not receive this Globalping instance as its receiver.
+    // Call the injected fetch function without binding it to this client.
     const fetcher = this.fetcher;
     const response = await fetcher(`${GLOBALPING_API}${path}`, { ...init, redirect: "manual", signal: AbortSignal.timeout(8000),
       headers: { "content-type": "application/json", "user-agent": "cf-dnspod-sync/2.0 (+independent-network-test)", "accept-encoding": "gzip", ...(etag ? { "if-none-match": etag } : {}) } });

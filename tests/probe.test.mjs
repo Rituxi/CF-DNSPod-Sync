@@ -67,7 +67,7 @@ test("a group tests authoritative current IP plus two retained candidates and pe
     const replay = await runRemoteProbe(env, f); assert.equal(replay.reason, "round-already-claimed"); assert.equal(f.jobs.size, 4);
   } finally { f.d.close(); }
 });
-test("native fetch callbacks are invoked without a class receiver, as required by Workers", async () => {
+test("native fetch callbacks are invoked without a class receiver", async () => {
   const f = await fixture();
   try {
     const result = await runRemoteProbe(env, { ...f, fetcher: async function(url, init) {

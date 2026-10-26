@@ -1,78 +1,77 @@
 # Cloudflare 三网实测与 DNSPod 地址池
 
-GitHub Actions 运行现有 Node 入口，抓取候选、调度真实大陆三网探针、比较历史并按证据更新独立测试地址池 `pick.luro.qzz.io`。一个轻量 Cloudflare 时钟只负责发 GitHub 启动请求，避免依赖本仓库尚未产生事件的 GitHub 原生定时入口。独立测试 Worker `cf-ipv4-test` 与工具 D1 `cf-dnspod-state` 保留在同一项目。正式业务服务不在本工具的操作范围。
+运行流程只有一条：**轻量 Worker 定时触发 → GitHub Actions 抓取、实测、选址 → 工具 D1 保存证据 → 按规则更新 DNSPod**。
 
-当前发布保持冻结。冻结期间仍抓取和测量，DNS 不更新。迁移进度和真实验证见[部署记录](docs/deployment-and-acceptance.md)。
+当前发布保持冻结：继续抓取和测量，保持现有 DNS。正式业务接入需另行验收。[实际验证记录](docs/deployment-and-acceptance.md) · [ITDOG 复测](docs/itdog-acceptance.md)
 
-## 架构与频率
+## 当前架构
 
-| 任务或资源 | 职责 | 周期（UTC） |
+| 入口或资源 | 职责 | 周期（UTC） |
 | --- | --- | --- |
-| Actions `DNSPod sync` | 来源、候选、权威回读、历史决策、DNSPod 发布及验证；唯一自动 DNS 写入方 | 每小时 03、33 分 |
-| Actions `Three-carrier probe` | 通过 Globalping 调度大陆电信 AS4134、联通 AS4837、移动 AS9808，每家 3 个实际探针 | 每小时 10、25、40、55 分 |
-| `cf-dnspod-actions-trigger` | 两条 Cron、每次一个 GitHub API 请求；按 Cron 表达式识别对应任务，返回实际运行 ID | 同步 03/33 分，探测 10/25/40/55 分 |
-| `cf-ipv4-test` | `https://probe.luro.qzz.io/health` 固定 HTTPS 响应 | 无 Cron |
-| `cf-dnspod-state` | 权威快照、候选、近 48 小时报告、租约、冻结和切换审计 | 原有独立 D1 |
+| `cf-dnspod-actions-trigger` | 仅向本仓库发送一个工作流启动请求，不运行后台业务 | 同步 03/33 分；探测 10/25/40/55 分 |
+| Actions `DNSPod sync` / `run.mjs` | 网页抓取、候选、权威回读、历史选址、DNSPod 更新及验证 | 每 30 分钟 |
+| Actions `Three-carrier probe` / `probe.mjs` | 调度 Globalping 真实大陆电信 AS4134、联通 AS4837、移动 AS9808 探针 | 每 15 分钟 |
+| D1 `cf-dnspod-state` | 原有候选、权威快照、测量历史、冻结、租约、预算及切换审计 | 沿用原库 |
+| `cf-ipv4-test` | 独立 `https://probe.luro.qzz.io/health`，提供固定正确 JSON | 无 Cron |
 
-半小时同步、15 分钟探测的频率不变；启动分钟整体后移 3 分钟，避开整点负载。两个旧后台 Worker 保留为停用备份，配置中 Cron 为空。业务工作流移除原生 `schedule`，只接收启动请求，避免日后原生定时恢复造成重复。时钟的 `DISPATCH_ENABLED` 只控制启动请求，不解除 D1 中的发布冻结；工作流名称显示“定时同步”“定时三网探测”或“定时链路验证”。
+GitHub 服务器负责抓取和调度，三网测速发生在真实运营商探针上。两个旧后台 Worker 已删除；业务工作流只接受 `workflow_dispatch`，定时入口统一由轻量 Worker 负责，保持 30/15 分钟频率。实际启动时间可能因 Cloudflare 投递或 GitHub 排队而后移。
 
-GitHub 服务器只负责抓取网页、请求 API 和决策，测速始终发生在 Globalping 的真实大陆三网探针上。普通入口、当前 IP 和候选尽力复用同轮探针组，核对运营商和地区元数据；Globalping 不公开稳定节点 ID。
+配置与代码边界：
 
-模块边界保持：`sources.ts` 来源校验，`candidates.ts` 候选连续性，`measurement.ts` 实测归一化和公平比较，`selection.ts` 纯策略，`state.ts` D1，`sync.ts` 发布，`remote-probe.ts` 远程探针调度。Node 与 Worker 入口共用这些模块，阈值集中在 `src/config.ts`。
+- `runtime.json`：两个 Node 入口的业务配置；不依赖 Worker 部署文件。
+- `wrangler.trigger.jsonc`、`wrangler.test.jsonc`：仅部署时钟和独立测试 Worker。
+- `src/sources.ts`、`candidates.ts`：来源及候选连续性；`globalping.ts`、`measurement.ts`、`remote-probe.ts`：实测；`selection.ts`：选址；`state.ts`：状态事务；`sync.ts`：发布。阈值集中在 `src/config.ts`。
 
-## 测量和选址规则
+## 选址规则
 
-1. V2RaySSR 优先、HostMonit 补足。每源每线前 3 个合格地址中保留最多 2 个不同挑战者，当前 IP 即使掉榜仍参与测量。严格校验 IPv4、Cloudflare 官方网段、来源原始时间不超过 6 小时、未来容差 5 分钟、丢包不超过 1%、延迟不超过 1000ms。新坏报告使候选失效，默认线只接受明确多线数据。
-2. 10 秒内完成、HTTP 200、有效 TLS、完整正确的服务 JSON、固定 IP 符合才算成功。慢 200、快速 403、错误页面均失败；真实首次失败保留，不能以重试成功覆盖。正确 Host/SNI、HTTPS 和 `/health` 保持。
-3. 每轮普通入口、当前和最多 2 个挑战者共至多 4 目标，每目标至多 9 个探针。采集未完成、429、离线、ASN/地域异常不能伪装为成功。运营商线至少需要本运营商 3 个可比结果，默认线需要三家各 3 个。
-4. 最近 6 小时，同候选、同权威基准连续两轮完整可比测量，每轮失败更少才允许切换。平手保持；仅双方两轮均零失败且每轮 P95 同时改善至少 20% 和 100ms，才允许速度切换。默认线任一家失败数不能增加。
-5. 正常冷却 60 分钟。只有当前连续两轮多数失败、同轮零失败的已验证备用仍在 2 小时内，才可绕过冷却。单个失败节点不触发。优先复测仍共享预算。
-6. DNSPod 权威回读是基准。写前核对记录身份、IP、候选、新鲜度、最新两轮证据和租约；冻结检查、发布意图和证据检查保持原子性。写后回读，异常或结果不明时下轮重建基准，重新积累证据。
-7. 只管理已初始化的 `@ A` 默认、电信、联通、移动四条记录，每条一个 IPv4、TTL 600、备注 `managed-by:cf-dnspod-sync`。不迁移旧 CNAME、不删除其他记录。证据不足或来源/测量失败就保持当前 DNS，不自动退回榜单第一名。
+1. V2RaySSR 优先、HostMonit 补足。每源每线前 3 个合格地址中保留最多 2 个不同挑战者，当前 IP 掉榜仍参与测量。校验 IPv4、Cloudflare 官方网段、来源原始时间不超过 6 小时、未来容差 5 分钟、丢包不超过 1%、延迟不超过 1000ms。新坏报告使候选失效；默认线只接受明确多线数据。
+2. 10 秒内完成、HTTP 200、有效 TLS、完整正确的服务 JSON、固定 IP 符合才算成功。慢 200、快速 403、错误页面均失败。保留真实首次失败，不以重试成功覆盖；正确 Host/SNI、HTTPS 和 `/health` 不变。
+3. 每轮普通入口、当前和最多 2 个挑战者，共至多 4 目标，每目标电信、联通、移动各 3 个探针。尽力复用同轮探针组，核对运营商和地区元数据；提供方没有稳定节点 ID。运营商线需要本运营商 3 个可比结果，默认线需要三家各 3 个；未完成、离线、429 和元数据异常不算成功。
+4. 最近 6 小时，同候选、同权威基准连续两轮完整可比测量，每轮失败更少才允许切换。平手保持。仅双方两轮均零失败、每轮 P95 同时改善至少 20% 和 100ms，才允许速度切换；默认线任一家失败数不能增加。所有发布入口均执行这套判定。
+5. 正常冷却 60 分钟。仅当前连续两轮多数失败，且同轮零失败的已验证备用仍在 2 小时内，才可绕过冷却。单节点失败不触发；优先复测仍共享预算。
+6. DNSPod 权威回读是基准。写前检查记录身份、IP、候选、时效及租约；冻结、最新两轮证据和发布意图原子检查。写后回读；异常或结果不明时重建基准、重新积累证据。
+7. 只管理 `pick.luro.qzz.io` 已初始化的 `@ A` 默认、电信、联通、移动四条记录，每条一个 IPv4、TTL 600、备注 `managed-by:cf-dnspod-sync`。证据不足、来源或测量失败就保持原 DNS，不按榜单直接发布，不迁移其他记录。
 
-## 预算与调度延迟
+## 预算与延迟
 
-轮转顺序为联通→电信→移动→默认。正常探针测试上限约 144 次/小时；手动和失败复测共享 D1 的 15 分钟时段、3 分钟租约及滚动小时 180 次预留上限，失败轮预留也计入。创建不重试，429 按提供方时间退避，不更换出口绕过额度，不购买探针。
+轮转顺序：联通 → 电信 → 移动 → 默认。正常上限约 144 次探针测试/小时；手动与失败复测共享 D1 的 15 分钟时段、3 分钟租约、滚动小时 180 次预留上限。失败轮的预留也计入。创建不重试，429 按提供方时间退避，不绕过额度、不购买探针。
 
-[Globalping 匿名免费额度](https://globalping.io/credits)为每出口 IP 每小时 250 次测试，原 180 次本地保护上限保持；每轮创建前还读取提供方实际剩余额度并保留 18 次余量。GitHub 共用出口可能有其他用户消耗额度，仍按提供方退避处理。[D1 免费额度](https://developers.cloudflare.com/d1/platform/pricing/)为每天读取 500 万行、写入 10 万行，账户总存储 5GB。Actions 摘要记录本次实际行读写；这些额度与账户其他数据库共享，不能把单次测试当作整账户长期用量证明。
+保留 10 秒测量预算、20 秒首次轮询等待、5 秒后续间隔、最多 20 次结果查询。首次完成结果及时落库，历史保留 48 小时。两个业务工作流共用 concurrency，运行中的任务不被新任务取消；D1 同时负责租约及去重。
 
-保留 10 秒测量预算、20 秒首次轮询等待、5 秒后续间隔及最多 20 次结果查询。D1 批量请求保持事务语义，首次完成结果先保存。工作流共用 concurrency 分组，运行中任务不被新任务取消；D1 租约与去重仍负责跨平台重叠保护。
+权威快照有效期 35 分钟、证据有效期 6 小时不放宽。延迟导致快照过期时跳过探测、保持 DNS，不追补漏掉的时段。摘要保留 `triggerSource` 和 `scheduledAt`，便于核对自动投递及排队时间。
 
-GitHub 原生定时曾没有生成运行事件，现改由轻量时钟调用 `workflow_dispatch`。GitHub runner 仍可能排队；35 分钟快照和 6 小时证据时效不放宽。快照过期就跳过探测、保持 DNS，不补跑漏掉的时段。启动请求不自动重试，结果不明时依靠下一周期和原 D1 去重恢复。摘要保留时钟时间与触发来源，可核查投递及排队延迟。手动/API 触发不依赖原生定时的 60 天活动规则。
+免费额度：[公开仓库标准 Actions runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)，本项目只用 `ubuntu-24.04`，每天计划 48 次同步、96 次探测，不使用付费大型 runner、artifacts 或缓存。[Workers Free](https://developers.cloudflare.com/workers/platform/limits/) 每天 10 万请求、账户共 5 条 Cron；本工具时钟约 144 次调用/天、2 条 Cron。[D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) 每天读 500 万行、写 10 万行、账户存储共 5GB；运行摘要报告实际行读写，需与账户其他数据库共用额度。[Globalping 匿名免费额度](https://globalping.io/credits)每出口 IP 每小时 250 次测试；每轮创建前读取实际余额并保留 18 次余量，共用 GitHub 出口额度不足就退避。
 
-本仓库只用标准 `ubuntu-24.04` 托管 runner；[公开仓库标准 runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。每天计划 48 次同步、96 次探测，不受私有仓库每月 2,000 分钟配额约束。不使用付费大型 runner，不上传 artifacts、不启用缓存。时钟每天约 144 次调用、占两条 Cron；加上账户原有两条业务 Cron，共 4 条，低于 [Workers Free 的每天 10 万请求和 5 个 Cron](https://developers.cloudflare.com/workers/platform/limits/)。时钟不抓网页、不读 D1、不签 DNS 请求、不轮询探测结果；实际 CPU 验证见部署记录。D1 和 Globalping 沿用原预算。公开日志只输出白名单摘要，完整测量保存在工具 D1。
+## 配置与维护
 
-## 配置与操作
+使用 Node.js 24.22.1、PowerShell 7。安装并检查：`npm ci`、`npm run check`。
 
-需要 Node.js 24.22.1（24 系列）、PowerShell 7。本机运行 `npm ci`、`npm run check`。
+GitHub 仓库 Variables 填 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`。Secrets 如下；不要把密钥放进代码、聊天或日志。
 
-Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`。业务凭据放 Actions Secrets：
-
-| Secret | 用途 |
+| Actions Secret | 用途 |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | 对工具所在账户的 D1 Edit；无需 DNS/Workers 权限 |
-| `TENCENTCLOUD_SECRET_ID` | 限工具 DNSPod 域名的腾讯云子用户 SecretId |
-| `TENCENTCLOUD_SECRET_KEY` | 同一对 SecretKey |
+| `CLOUDFLARE_API_TOKEN` | 指定账户的 D1 Edit，无需 DNS/Workers 权限 |
+| `TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY` | 仅限工具 DNSPod 域名的子用户凭据，策略见 [模板](docs/dnspod-policy.json) |
 
-探测工作流只接收 D1 token，不接收腾讯云凭据。Cloudflare D1 token 的权限范围是选定账户，代码额外限制为配置的工具数据库；不要把业务数据库 ID 填入变量。腾讯云策略模板见 [dnspod-policy.json](docs/dnspod-policy.json)。不要将密钥贴到聊天、日志或仓库中。
+探测工作流只接收 D1 token。程序在发送 SQL 前向 Cloudflare 核对数据库名称与 ID，必须是 `cf-dnspod-state`。账户级 D1 token 的权限不能精确到单库，不要填入业务数据库 ID。
 
-时钟另用一个仅限本仓库 `Actions: write` 的 GitHub fine-grained token，保存在它的 Cloudflare Secret `GITHUB_DISPATCH_TOKEN` 中；没有代码写入、DNS 或 D1 权限。可通过 `scripts/set-trigger-token.ps1` 隐藏输入到本机忽略目录。维护者需要在令牌到期前更新该 Secret，不能上传本机 GCM 的完整登录凭据。`POST /dispatch` 是用同一专用令牌鉴权的主动链路验证入口，只允许触发必须冻结的同步或探测。
+时钟只持有本仓库 `Actions: write` 的 GitHub fine-grained token，保存在 Cloudflare Secret `GITHUB_DISPATCH_TOKEN`。维护者需在到期前轮换：先 `pwsh -File scripts/set-trigger-token.ps1` 隐藏输入，再 `npm run trigger:token`。上传前先用新令牌启动只读 `plan` 验证权限，通过后才替换 Secret。时钟没有 D1、DNSPod 或代码写入权限。
 
-轮换时钟令牌时，先运行 `pwsh -File scripts/set-trigger-token.ps1`，再运行 `npm run trigger:token`。本机命令使用已配置的工具账户和 Wrangler profile，仅更新该时钟的加密 Secret，不改业务凭据。临时的 `CLOCK_VALIDATE_FROZEN_SYNC=true` 仅用于真实 Cron 投递诊断，强制启动冻结同步；正常配置没有此开关，验收后必须移除并恢复原 Cron。
+本机资源标识保存在忽略文件 `.local/cloudflare-state.json`：`accountId`、`databaseId`、可选 `wranglerProfile`；也支持 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`WRANGLER_PROFILE` 环境变量。本机可用已有 Wrangler 登录；腾讯云凭据用 `scripts/set-credentials.ps1` 隐藏保存。Actions 只使用 Secrets，不使用本机登录或文件。
 
-本机资源标识放在忽略文件 `.local/cloudflare-state.json`：`accountId`、`databaseId`、可选 `wranglerProfile`；也可设置同名用途的环境变量 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`WRANGLER_PROFILE`。本机 D1 可用现有 Wrangler profile 登录；Actions 只使用 API Token。腾讯云本机凭据仍由 `scripts/set-credentials.ps1` 隐藏输入并保存到忽略目录。
-
-| 命令或手动工作流模式 | 作用 |
+| 命令 / Actions 手动模式 | 用途 |
 | --- | --- |
 | `npm run observe` / sync `observe` | 只抓公开来源，无 D1/DNS 写入 |
-| `npm run plan` / sync `plan` | 来源、权威记录、历史选址只读预览，不写 D1/DNS |
-| sync `frozen` | 完整同步，必须已有冻结；更新快照而不写 DNS |
-| `npm run apply` / sync `apply` | 正常完整同步；冻结时仍不写 DNS |
-| `npm run probe` / probe 手动触发 | 调度远程三网探针，共享原有时段和预算 |
-| `npm run status` | 查看冻结、当前线路和近期测量 |
-| `npm run freeze` | 开启发布冻结；不停止测量 |
-| `npm run resume` | 仅维护者明确决定后手动解除冻结 |
+| `npm run plan` / sync `plan` | 来源、权威、历史选址预览，不写 D1/DNS |
+| sync `frozen` | 完整同步，要求冻结已开启，写快照而不写 DNS |
+| `npm run apply` / sync `apply` | 完整同步；冻结时仍不写 DNS |
+| `npm run probe` / probe 手动运行 | 真实三网探测，共享时段及预算 |
+| `npm run status` | 查看冻结、权威检查时间、DNS 最后修改时间及近期测量 |
+| `npm run freeze` / `npm run resume` | 手动开启 / 解除发布冻结；解除前须由维护者明确决定 |
+| `npm run deploy` / `npm run deploy:test` | 部署轻量时钟 / 独立测试 Worker |
+| `npm run deploy:dry-run` | 构建检查这两个 Worker |
+| `npm run logs` / `npm run logs:test` | 查看时钟 / 独立测试 Worker 日志 |
 
-Actions 不提供解除冻结功能。时钟开关与发布冻结彼此独立。部署独立测试 Worker 使用 `npm run deploy:test`，部署时钟使用 `npm run deploy:trigger`；`npm run deploy:dry-run` 验证四个入口可构建。部署脚本把本机标识填入忽略的临时配置，两个旧后台配置不再设置 Cron。
+Actions 不提供解除冻结功能。时钟 `DISPATCH_ENABLED` 只控制定时投递；关闭它不会解除冻结。需要主动排查链路时，可用专用令牌鉴权 `POST /dispatch`，只允许启动必须冻结的同步或探测，不需要临时增加 Cron。
 
-切换前必须按顺序完成来源、只读、冻结全流程及“时钟→Actions→D1”主动链路验证，再启用时钟并检查两个旧后台 Cron 为空。回退时先关闭时钟 Cron、确认无在途任务，再按本机备份恢复旧 Cron；这会重新引入原 Worker CPU 与来源风险。不要同时长期启用两套调度。
+DNSPod 后台的更新时间是**记录最后修改时间**，不是任务检查时间。冻结或没有符合条件的新地址时，这个时间保持原值属于正常行为。用 `status` 的 `lastAuthoritativeCheckAt`、`lastProbeCompletedAt` 和每条记录的 `dnsUpdatedOn` 分别判断检查、测量和实际修改；不要为刷新显示时间反复写入同一地址。

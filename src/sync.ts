@@ -1,10 +1,10 @@
 import { readCandidates } from "./sources.ts";
 import { DnsPod, validateEnv, type DnsEnv, type DnsLine, type DnsRecord } from "./dnspod.ts";
-import { DNS_CONFIG, LINES, POLICY, SOURCE_CONFIG, type Line } from "./config.ts";
+import { DNS_CONFIG, LINES, type Line } from "./config.ts";
 import { ipv4Number, type Fetcher } from "./network.ts";
 import { StateStore, LeaseLostError, type LineState } from "./state.ts";
 import { buildChallengers } from "./candidates.ts";
-import { decideLine, type Decision } from "./selection.ts";
+import { decideLine } from "./selection.ts";
 
 export function sameRecord(a: DnsRecord, b: DnsRecord): boolean {
   return ["RecordId", "Name", "Type", "Value", "Line", "LineId", "TTL", "Status", "Remark"].every(key => a[key as keyof DnsRecord] === b[key as keyof DnsRecord]);
@@ -23,12 +23,11 @@ export function managedRecords(records: DnsRecord[], lines: DnsLine[]): DnsRecor
 export async function synchronize(env: DnsEnv, options: {
   fetcher?: Fetcher; now?: number | (() => number); dryRun?: boolean; store?: StateStore;
   beforeApply?: (plan: unknown) => Promise<void>; sleep?: (ms: number) => Promise<void>;
-  manualRankedLine?: Line;
   requireFrozen?: boolean;
 } = {}) {
   validateEnv(env);
   if (env.SYNC_MODE === "paused") return { status: "paused", dnsWrites: false };
-  if (!env.STATE && !options.store) throw new Error("Missing dedicated tool STATE database; ranked writes are disabled");
+  if (!env.STATE && !options.store) throw new Error("Missing dedicated tool STATE database");
   const store = options.store ?? new StateStore(env.STATE!);
   const startingStateCalls = store.calls;
   const clock = typeof options.now === "function" ? options.now : options.now === undefined ? () => Date.now() : () => options.now as number;
@@ -57,14 +56,7 @@ export async function synchronize(env: DnsEnv, options: {
         candidates: buildChallengers(line.id, record.Value, pool ?? { candidates: [] }, old?.candidates ?? [], now),
         sourceHealthy, backups: unchanged ? old.backups : [] };
     });
-    const decisions: Decision[] = states.map(state => {
-      if (options.manualRankedLine === state.line) {
-        const ranked = poolResult.value?.selections.find(selection => selection.line === state.line)?.candidate;
-        return { line: state.line, kind: ranked && ranked.ip !== state.record.Value ? "switch" : "hold",
-          reason: "explicit-manual-ranked-fallback", ip: ranked?.ip ?? null, evidence: [], comparisons: [], backups: state.backups, emergency: false };
-      }
-      return decideLine(state, rounds, now);
-    });
+    const decisions = states.map(state => decideLine(state, rounds, now));
     for (const state of states) {
       const decision = decisions.find(decision => decision.line === state.line)!;
       state.backups = decision.backups;
@@ -90,10 +82,6 @@ export async function synchronize(env: DnsEnv, options: {
       const intent = { decision, from: state.record.Value, to: decision.ip, version: state.version };
       const stillEligible = () => {
         const at = clock();
-        if (options.manualRankedLine === state.line) {
-          const ranked = poolResult.value?.selections.find(selection => selection.line === state.line)?.candidate;
-          return !!ranked && ranked.ip === decision.ip && ranked.measuredAt + SOURCE_CONFIG.maxAgeHours * 3600_000 > at && at - state.fetchedAt <= POLICY.snapshotMaxAgeMs;
-        }
         const fresh = decideLine(state, rounds, at);
         return fresh.kind === "switch" && fresh.ip === decision.ip;
       };
@@ -108,7 +96,7 @@ export async function synchronize(env: DnsEnv, options: {
           outcomes.push({ line: state.line, status: "held", reason: "authoritative-baseline-changed" }); continue;
         }
         if (!stillEligible()) { outcomes.push({ line: state.line, status: "held", reason: "evidence-expired-before-write" }); continue; }
-        begun = await store.beginSwitch(id, state.line, clock(), intent, locked!, options.manualRankedLine === state.line ? undefined :
+        begun = await store.beginSwitch(id, state.line, clock(), intent, locked!,
           { roundIds: decision.evidence, baselineVersion: state.version });
         if (!begun) { outcomes.push({ line: state.line, status: "held", reason: "publication-frozen-lease-lost-evidence-changed-or-already-attempted" }); continue; }
         if (!stillEligible()) {

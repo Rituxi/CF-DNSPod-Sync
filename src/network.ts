@@ -26,34 +26,18 @@ export function validateIps(ips: string[]): string[] {
 
 export async function readLimitedText(response: Response, label: string): Promise<string> {
   if (!response.body) throw new Error(`Empty response from ${label}`);
-  type WorkerReader = ReadableStreamBYOBReader & { readAtLeast?: (min: number, view: Uint8Array) => Promise<ReadableStreamReadResult<Uint8Array>> };
-  let byob: WorkerReader | undefined;
-  try { byob = response.body.getReader({ mode: "byob" }); } catch { /* Node and generic streams use the standard reader below. */ }
-  const coalesced = typeof byob?.readAtLeast === "function";
-  if (!coalesced) byob?.releaseLock();
-  const reader = coalesced ? byob! : response.body.getReader();
-  const lengthHeader = response.headers.get("content-length");
-  const lengthHint = lengthHeader !== null && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : NaN;
-  // Treat Content-Length only as an allocation hint, never as proof of EOF or
-  // the size bound. Small JSON responses need not allocate a 64 KiB block.
-  const defaultBlockBytes = 64 * 1024;
-  let blockBytes = !response.headers.get("content-encoding") && Number.isInteger(lengthHint) && lengthHint >= 0 && lengthHint < defaultBlockBytes
-    ? lengthHint + 1 : defaultBlockBytes;
+  // Source and measurement collection now runs only in Node. Bound actual
+  // decompressed bytes and decode once so fragmented Chinese text stays intact.
+  const reader = response.body.getReader();
   let size = 0;
   const chunks: Uint8Array[] = [];
   try {
     while (true) {
-      // Workers' readAtLeast combines small network fragments in native code. Keep
-      // the same 1 MiB cap and decode only after all bytes, including a partial final block.
-      const { value, done } = coalesced ? await byob!.readAtLeast!(blockBytes, new Uint8Array(blockBytes)) : await (reader as ReadableStreamDefaultReader<Uint8Array>).read();
+      const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
       if (size > 1024 * 1024) throw new Error(`${label} response exceeds 1 MiB`);
       chunks.push(value);
-      // Only Workers' readAtLeast guarantees that a short block means EOF.
-      // Avoid a second native read/allocation for small API responses.
-      if (coalesced && value.byteLength < blockBytes) break;
-      blockBytes = defaultBlockBytes;
     }
     if (chunks.length === 1) return new TextDecoder().decode(chunks[0]);
     // Decode once: provider pages and reports can arrive in many small network chunks.
@@ -66,7 +50,7 @@ export async function readLimitedText(response: Response, label: string): Promis
 }
 
 export async function getText(fetcher: Fetcher, url: string, init: RequestInit = {}): Promise<string> {
-  // Workers supports manual/follow, not Node's redirect:error. Never forward API credentials on a redirect.
+  // Never forward API credentials to a redirect target.
   const response = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(8000) });
   if (!response.ok) {
     await response.body?.cancel();

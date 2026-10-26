@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
-import { createServer } from "node:http";
-import { gzipSync } from "node:zlib";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { StateStore } from "../src/state.ts";
 import { synchronize } from "../src/sync.ts";
@@ -14,93 +11,6 @@ import { decideLine } from "../src/selection.ts";
 
 // The installed workerd supports this date; production keeps its own configured date.
 const runtime = options => new Miniflare(convertV4MiniflareOptions({ modules: true, compatibilityDate: "2026-10-13", ...options }));
-
-test("native Workers stream coalesces fragments without losing UTF-8 or the response size bound", async () => {
-  const network = stripTypeScriptTypes(await readFile(new URL("../src/network.ts", import.meta.url), "utf8"));
-  const mf = runtime({ script: network + `
-    export default { async fetch(request) {
-      const large = new URL(request.url).pathname === "/oversized";
-      const length = new URL(request.url).searchParams.get("length");
-      const expected = length !== null ? "x".repeat(Number(length)) : large ? "x".repeat(1048577) : "a".repeat(65535) + "电信联通移动".repeat(12000);
-      const bytes = new TextEncoder().encode(expected), stream = new FixedLengthStream(bytes.length);
-      const inspection = stream.readable.getReader({ mode: "byob" }), proto = Object.getPrototypeOf(inspection);
-      inspection.releaseLock();
-      const original = proto.readAtLeast; let reads = 0, allocated = 0;
-      proto.readAtLeast = function(...args) { reads++; allocated += args[1].byteLength; return original.apply(this, args); };
-      const writer = stream.writable.getWriter();
-      const producing = (async () => {
-        try { for (let offset = 0; offset < bytes.length; offset += 257) await writer.write(bytes.slice(offset, offset + 257)); await writer.close(); }
-        catch { /* The bounded reader cancels the oversized stream. */ }
-      })();
-      try {
-        const hint = new URL(request.url).searchParams.get("hint");
-        const headers = hint === null ? {} : { "content-length": hint };
-        if (new URL(request.url).searchParams.has("encoded")) headers["content-encoding"] = "gzip";
-        const actual = await readLimitedText(new Response(stream.readable, { headers }), "native stream"); await producing;
-        return Response.json({ exact: actual === expected, reads, allocated });
-      } catch (error) {
-        await producing; return Response.json({ bounded: /1 MiB/.test(error.message), reads });
-      } finally { proto.readAtLeast = original; }
-    } };
-  ` });
-  try {
-    const normal = await (await mf.dispatchFetch("http://local.test/")).json();
-    const oversized = await (await mf.dispatchFetch("http://local.test/oversized")).json();
-    assert.equal(normal.exact, true); assert.equal(normal.reads, 5);
-    assert.equal(oversized.bounded, true); assert.ok(oversized.reads <= 17);
-    for (const [length, reads] of [[0, 1], [32768, 1], [65536, 2], [65537, 2], [1048576, 17]]) {
-      const result = await (await mf.dispatchFetch(`http://local.test/?length=${length}`)).json();
-      assert.equal(result.exact, true, `exact bytes at ${length}`);
-      assert.equal(result.reads, reads, `native reads at ${length}`);
-    }
-    const small = await (await mf.dispatchFetch("http://local.test/?length=896&hint=896")).json();
-    assert.equal(small.exact, true); assert.equal(small.reads, 1); assert.equal(small.allocated, 897);
-    for (const hint of ["0", "1", "99999999", "invalid"]) {
-      const result = await (await mf.dispatchFetch(`http://local.test/?length=65537&hint=${hint}`)).json();
-      assert.equal(result.exact, true, `a misleading length hint ${hint} must not truncate data`);
-    }
-    assert.equal((await (await mf.dispatchFetch("http://local.test/oversized?hint=1")).json()).bounded, true);
-    const encoded = await (await mf.dispatchFetch("http://local.test/?length=65537&hint=1&encoded")).json();
-    assert.equal(encoded.exact, true); assert.equal(encoded.reads, 2);
-  } finally { await mf.dispose(); }
-});
-
-test("native fetch preserves unknown-length and gzip bodies and bounds decompressed bytes", async () => {
-  const expected = "a".repeat(65535) + "电信联通移动".repeat(12000);
-  const bytes = Buffer.from(expected), compressed = gzipSync(bytes), overflow = gzipSync(Buffer.alloc(1048577, 120));
-  const server = createServer((request, response) => {
-    if (request.url === "/chunked") {
-      response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      for (let offset = 0; offset < bytes.length; offset += 257) response.write(bytes.subarray(offset, offset + 257));
-      response.end();
-    } else {
-      const body = request.url === "/oversized" ? overflow : compressed;
-      response.writeHead(200, { "content-encoding": "gzip", "content-length": body.length });
-      response.end(body);
-    }
-  });
-  let mf;
-  try {
-    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-    const origin = `http://127.0.0.1:${server.address().port}`;
-    const network = stripTypeScriptTypes(await readFile(new URL("../src/network.ts", import.meta.url), "utf8"));
-    mf = runtime({ script: network + `
-      export default { async fetch(request) {
-        try { return Response.json({ text: await getText(fetch, ${JSON.stringify(origin)} + new URL(request.url).pathname) }); }
-        catch (error) { return Response.json({ error: error.message }); }
-      } };
-    ` });
-    for (const path of ["/chunked", "/gzip"]) {
-      const result = await (await mf.dispatchFetch(`http://local.test${path}`)).json();
-      assert.equal(result.text, expected, `${path}: real native fetch must preserve the complete UTF-8 text`);
-    }
-    assert.ok(overflow.length < 65536);
-    assert.match((await (await mf.dispatchFetch("http://local.test/oversized")).json()).error, /1 MiB/);
-  } finally {
-    await mf?.dispose();
-    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
-  }
-});
 
 test("native D1 rolls back a failed combined claim and protects snapshot/pruning during lease takeover", async () => {
   const mf = runtime({ script: "export default { fetch() { return new Response('local'); } };", d1Databases: { STATE: "review-batch-state" } });
@@ -165,7 +75,9 @@ test("native D1 runs all migrations, four-line publication and an atomic audit/s
     assert.equal(await store.beginSwitch("stale-evidence", state.line, at, {}, owner,
       { roundIds: [...proof].reverse().map(item => item.id), baselineVersion: state.version }), false);
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM switch_history WHERE id='stale-evidence'").all()).results[0].n, 0);
-    await store.beginSwitch("rollback-test", state.line, at, {}, owner);
+    await db.prepare("DELETE FROM probe_rounds WHERE id=?").bind(pending.id).run();
+    assert.equal(await store.beginSwitch("rollback-test", state.line, at, {}, owner,
+      { roundIds: [...proof].reverse().map(item => item.id), baselineVersion: state.version }), true);
     await db.prepare("CREATE TRIGGER reject_snapshot BEFORE UPDATE ON line_state BEGIN SELECT RAISE(ABORT,'snapshot failed'); END").run();
     await assert.rejects(store.completeSwitch("rollback-test", {}, state, at, owner), /snapshot failed/);
     assert.equal((await db.prepare("SELECT status FROM switch_history WHERE id='rollback-test'").all()).results[0].status, "attempting");
