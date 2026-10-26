@@ -60,11 +60,14 @@ Actions 配置保持 30/15 分钟频率，整体后移 3 分钟避开整点。�
 | 13:02 时钟主动启动探测 | 联通线一组 4×9=36 次真实探针测试；每目标三家各 3 个，覆盖完整，`measured`、`validForLine:true`，结果落回原 D1 | [三网链路](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40272157101) |
 | 13:05 探测后再次同步 | 从原 D1 读入证据，连续两轮门槛保留，四线冻结持有，DNS 未写入 | [再次同步](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40272372573) |
 | 13:24–13:27 真实 Cron 投递诊断 | 临时每分钟仅启动必须冻结的同步，无额外探针；已捕获多次 `scheduled` 事件及关联 Actions 成功结果，证明实际自动投递 | [首个自动投递](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40274089505) |
+| 正常 13:40 周期的自动探测 | `triggerSource:cloudflare-cron`；电信线一组 36 次实际探针测试，四目标各三家 3 个、完整采集并入库，保留真实超时；`measured`、`validForLine:true`、`dnsWrites:false` | [正式周期自动探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40275620478) |
 
 三次完整 API 触发的 Cloudflare GraphQL CPU 为 **3.876、2.159、1.528ms**，Tail 取整为 3、2、1ms，均无错误。自动 Cron 的 Tail CPU 为 0、0、1ms。网络墙钟约 1.4–2 秒，不混作 CPU。主任务仍全部在 Actions，不能把这些数字当作旧完整后台已压入 10ms，也不声称已经覆盖长期分布。
 
 已恢复正常两条 Cron、关闭临时每分钟诊断并移除测试开关；两个旧后台 Cron 保持为空。旧同步 Worker 的两项 DNSPod Secret 已移除，当前业务凭据仅交给 Actions；旧 Worker 代码和 D1 绑定保留为停用备份，回退需要重新注入本机已有 DNSPod 凭据。独立测试 Worker 与正式业务不变。未购买服务。
 
 13:30 最终回读全部通过：冻结及冻结时间、DNS 全部记录和更新时间、切换审计 0 次、测试 Worker/健康响应、正式业务 Worker/Custom Domain 均与迁移前一致；原 D1 与两项既有迁移保留；时钟仅有专用 GitHub Secret、没有 D1/R2 或 DNS 凭据，测试开关不存在。Cloudflare 配置传播期间仍到达的旧 `* * * * *` 事件被新代码按表达式跳过，没有继续投递 Actions。最终 [Linux CI 101 项通过](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40274787871)，四入口构建、actionlint、差异检查和公开 Git 历史密钥扫描通过；本机工作区与公开仓库同步。
+
+正式周期样本的时钟时间为 13:40:39.459，Node 入口为 13:42:07.825，约 88 秒后开始，13:42:32 全部完成。本轮快照仍在 35 分钟有效期内，没有放宽时效或补测漏过时段。GitHub 接收 API 投递时事件类型仍是 `workflow_dispatch`；自动来源以工作流名称“定时三网探测”、摘要 `cloudflare-cron` 和 Cloudflare 定时事件关联的运行 ID 为证据。
 
 长期多周期准点性、晚高峰效果和未冻结的真实 DNS 修改路径仍待观察或用户后续授权，不解除现有冻结。
