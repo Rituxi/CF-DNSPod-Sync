@@ -20,9 +20,16 @@
 | 正常周期自动三网探测 | 14:10 默认线 4×9=36 次实际测试，每目标三家各 3 个；完整采集、真实失败保留、结果进入原 D1 | [自动探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40278302989) |
 | 删除旧 Worker 后的自动探测 | 14:25 周期延迟至约 14:27 开始，36 次真实测试，`measured`、`validForLine:true` | [清理后自动探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40279933427) |
 | 其他正常周期 | 13:40、13:55 的自动探测成功，均可关联时钟时间和运行 ID | [13:40](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40275620478)、[13:55](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40276894552) |
-| 已发布版本 Linux CI | Node 24.22.1，101 项通过 | [CI](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40274787871) |
+| 最终整理版本 Linux CI | 提交 `fd109ca`，Node 24.22.1，105 项全部通过 | [CI](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281566726) |
+| 同提交来源抓取 | 四线各 10 个合格候选，无 HTTP 520，过期来源继续过滤 | [新版来源](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281601487) |
+| 同提交只读选址 | 实际 D1 名称/ID 检查通过，读取 397 行、写入 0 行，DNS 未写入 | [新版只读预览](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281673026) |
+| 同提交冻结完整同步 | 部署后的时钟启动 Actions，读取 468 行、写入 6 行，四线冻结保持，DNS 未写入 | [新版完整同步](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281752094) |
+| 同提交真实探测 | 移动线 4 个目标，每目标电信 1、联通 3、移动 3 个实际探针，共 28 次；移动线覆盖满足原规则，`measured`、`validForLine:true`，D1 写入 7 行 | [新版探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281806380) |
+| 新探测后的完整同步 | 从原 D1 读入新报告并重新判定，读取 484 行、写入 6 行；仍冻结，DNS 未写入 | [新版测量后同步](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40281918055) |
 
 14:10 一轮普通入口 8/9 成功、当前 7/9、两个候选 9/9 与 7/9。完整采集不代表全部访问成功；超时照常进入失败数，没有以 GitHub 本机测速替代，也没有用重试覆盖失败。
+
+最终验证轮因提供方实际分配少于请求，每目标只有 7 个探针；它仅满足移动线路的原有判定要求，不能作为默认线三网完整覆盖的证据。没有补造缺失的电信样本，也没有放宽测量标准。
 
 13:40 样本从时钟到 Node 入口约 88 秒。摘要的事件类型为 `workflow_dispatch`，自动来源由 `triggerSource:cloudflare-cron`、`scheduledAt` 和关联运行 ID 确认。快照及证据时效没有放宽。
 
@@ -43,6 +50,6 @@
 
 ## 验收边界
 
-Actions 验证以运行记录中的提交号为准。迁移前的成功记录证明现有调度可用；本轮 Node 配置整理及策略入口收拢还需在推送后使用对应新提交验证，不能把本机检查当作新版 Actions 运行结果。
+本次提交前复核重新核对了全部未提交改动、来源到发布的调用链、配置依赖、两轮证据和状态事务、真实调度及公开内容。没有发现新的阻止提交问题；前两轮留下的新版 Actions 验证已在提交 `fd109ca` 上补齐。代码已推送，轻量时钟已重新部署；运行记录的提交号可以区分新旧版本证据。
 
 长期自动运行与晚高峰效果、全国网络验收仍需继续观察。未冻结的真实 DNS 修改尚未在线验证，必须由维护者后续明确授权；不为测试解除现有冻结。独立测试 Worker、原工具 D1、正式域名、业务后端及业务数据库保持原资源。
