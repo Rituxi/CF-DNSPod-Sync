@@ -19,18 +19,29 @@ export async function credentials() {
 }
 export function remoteState(config, request = cfRequest, scope) {
   const path = requireStateScope(config, scope);
+  const usage = { requests: 0, rowsRead: 0, rowsWritten: 0 };
+  const account = results => {
+    for (const result of results ?? []) {
+      usage.rowsRead += result.meta?.rows_read ?? 0;
+      usage.rowsWritten += result.meta?.rows_written ?? 0;
+    }
+    return results;
+  };
   const query = async (sql, params) => {
-    const results = await request(path, { method: "POST", body: { sql, params } });
+    usage.requests++;
+    const results = account(await request(path, { method: "POST", body: { sql, params } }));
     if (!results?.[0] || results.some(result => result.success === false)) throw new Error("Dedicated state query failed");
     return results[0];
   };
   return {
+    usage,
     prepare(sql) {
       return { sql, values: [], bind(...values) { this.values = values; return this; },
         all() { return query(this.sql, this.values); }, run() { return query(this.sql, this.values); } };
     },
     async batch(statements) {
-      const results = await request(path, { method: "POST", body: { batch: statements.map(statement => ({ sql: statement.sql, params: statement.values })) } });
+      usage.requests++;
+      const results = account(await request(path, { method: "POST", body: { batch: statements.map(statement => ({ sql: statement.sql, params: statement.values })) } }));
       if (!Array.isArray(results) || results.length !== statements.length || results.some(result => result.success === false)) throw new Error("Dedicated state transaction failed");
       return results;
     },

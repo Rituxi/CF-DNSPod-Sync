@@ -15,6 +15,7 @@ export function summarize(kind, result) {
     reports: result.reports?.map(({ target, checked, successful, carriers, completeCoverage, reportUrl }) =>
       ({ target, checked, successful, carriers, completeCoverage, reportUrl })),
     countedSubrequests: result.countedSubrequests,
+    stateUsage: result.stateUsage,
   };
 }
 export async function outputResult(kind, result) {

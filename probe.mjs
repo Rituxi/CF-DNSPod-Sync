@@ -10,6 +10,7 @@ try {
     throw new Error("Frozen validation requires publication to remain frozen");
   }
   const result = await runRemoteProbe({ ...config.vars, STATE });
+  result.stateUsage = STATE.usage;
   await mkdir(new URL("./.local/", import.meta.url), { recursive: true });
   await writeFile(new URL(`./.local/success-probe-${Date.now()}.json`, import.meta.url), JSON.stringify(result, null, 2));
   await outputResult("probe", result);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { credentials } from "../scripts/runtime.mjs";
+import { credentials, remoteState } from "../scripts/runtime.mjs";
 import { cfRequest } from "../scripts/cloudflare-api.mjs";
 import { summarize } from "../scripts/report.mjs";
 
@@ -41,4 +41,18 @@ test("public Actions summaries preserve failures and exclude raw state and probe
   assert.equal(result.errors[0].error, "incomplete");
   assert.equal(result.reports[0].checked, 9); assert.equal(result.reports[0].successful, 6);
   assert.ok(!JSON.stringify(result).includes("private"));
+});
+
+test("REST state usage sums per-statement metadata and never changes parameterized SQL", async () => {
+  const scope = { accountId: "a".repeat(32), databaseId: "11111111-1111-4111-8111-111111111111" };
+  const config = { account_id: scope.accountId, d1_databases: [{ binding: "STATE", database_name: "cf-dnspod-state", database_id: scope.databaseId }] };
+  const requests = [];
+  const db = remoteState(config, async (_path, { body }) => {
+    requests.push(body);
+    return (body.batch ?? [body]).map(() => ({ success: true, results: [], meta: { rows_read: 4, rows_written: 1 } }));
+  }, scope);
+  await db.prepare("SELECT ? value").bind("first").all();
+  await db.batch([db.prepare("SELECT ? value").bind("second"), db.prepare("SELECT ? value").bind("third")]);
+  assert.deepEqual(db.usage, { requests: 2, rowsRead: 12, rowsWritten: 3 });
+  assert.deepEqual(requests[1].batch, [{ sql: "SELECT ? value", params: ["second"] }, { sql: "SELECT ? value", params: ["third"] }]);
 });

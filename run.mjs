@@ -18,6 +18,7 @@ try {
     const env = { ...config.vars, ...await credentials(), STATE: remoteState(config) };
     result = await synchronize(env, { dryRun: flag === "--plan", requireFrozen: process.env.REQUIRE_PUBLICATION_FROZEN === "true",
       manualRankedLine: fallback, beforeApply: plan => save("plan", plan) });
+    result.stateUsage = env.STATE.usage;
   }
   await save("result", result); await outputResult(flag.slice(2), result);
 } catch (error) { console.error(error instanceof Error ? error.message : "DNSPod sync failed"); process.exitCode = 1; }
