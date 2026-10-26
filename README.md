@@ -2,7 +2,7 @@
 
 运行流程只有一条：**轻量 Worker 定时触发 → GitHub Actions 抓取、实测、选址 → 工具 D1 保存证据 → 按规则更新 DNSPod**。
 
-当前发布保持冻结：继续抓取和测量，保持现有 DNS。正式业务接入需另行验收。[实际验证记录](docs/deployment-and-acceptance.md) · [ITDOG 复测](docs/itdog-acceptance.md)
+2026-10-26 已按维护者明确授权解除发布冻结：继续按现有实测规则自动维护 `pick.luro.qzz.io` 的四条受管记录。正式业务接入需另行验收。[实际验证记录](docs/deployment-and-acceptance.md) · [ITDOG 复测](docs/itdog-acceptance.md)
 
 ## 当前架构
 
