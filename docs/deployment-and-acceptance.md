@@ -65,4 +65,6 @@ Actions 配置保持 30/15 分钟频率，整体后移 3 分钟避开整点。�
 
 已恢复正常两条 Cron、关闭临时每分钟诊断并移除测试开关；两个旧后台 Cron 保持为空。旧同步 Worker 的两项 DNSPod Secret 已移除，当前业务凭据仅交给 Actions；旧 Worker 代码和 D1 绑定保留为停用备份，回退需要重新注入本机已有 DNSPod 凭据。独立测试 Worker 与正式业务不变。未购买服务。
 
+13:30 最终回读全部通过：冻结及冻结时间、DNS 全部记录和更新时间、切换审计 0 次、测试 Worker/健康响应、正式业务 Worker/Custom Domain 均与迁移前一致；原 D1 与两项既有迁移保留；时钟仅有专用 GitHub Secret、没有 D1/R2 或 DNS 凭据，测试开关不存在。Cloudflare 配置传播期间仍到达的旧 `* * * * *` 事件被新代码按表达式跳过，没有继续投递 Actions。最终 [Linux CI 101 项通过](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/40274787871)，四入口构建、actionlint、差异检查和公开 Git 历史密钥扫描通过；本机工作区与公开仓库同步。
+
 长期多周期准点性、晚高峰效果和未冻结的真实 DNS 修改路径仍待观察或用户后续授权，不解除现有冻结。
