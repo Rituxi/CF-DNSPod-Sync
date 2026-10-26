@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker, { dueTask, onClock, dispatchTask } from "../src/actions-trigger.ts";
+import worker, { CLOCK_CRONS, onClock, dispatchTask } from "../src/actions-trigger.ts";
+import { readFile } from "node:fs/promises";
 const token = "test-trigger-token", env = { GITHUB_DISPATCH_TOKEN: token, DISPATCH_ENABLED: "true" };
 const run = { workflow_run_id: 123, html_url: "https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/123" };
 const at = Date.parse("2026-10-26T04:33:00Z");
 
-test("one lightweight clock preserves exactly 48 sync and 96 probe starts per UTC day", () => {
+test("one lightweight clock preserves exactly 48 sync and 96 probe starts per UTC day", async () => {
+  const config = JSON.parse(await readFile(new URL("../wrangler.trigger.jsonc", import.meta.url), "utf8"));
+  assert.deepEqual(config.triggers.crons, Object.values(CLOCK_CRONS));
   const tasks = [];
   for (let minute = 0; minute < 1440; minute++) {
-    const timestamp = Date.parse("2026-10-26T00:00:00Z") + minute * 60000;
-    if (dueTask(timestamp)) tasks.push({ minute, task: dueTask(timestamp) });
+    for (const [task, cron] of Object.entries(CLOCK_CRONS)) if (cron.split(" ")[0].split(",").map(Number).includes(minute % 60)) tasks.push({ minute, task });
   }
   assert.equal(tasks.filter(item => item.task === "sync").length, 48);
   assert.equal(tasks.filter(item => item.task === "probe").length, 96);
@@ -19,13 +21,13 @@ test("one lightweight clock preserves exactly 48 sync and 96 probe starts per UT
 
 test("paused and unrelated clock minutes stay offline without credentials", async () => {
   const offline = () => { assert.fail("No API request expected"); };
-  assert.equal((await onClock({ scheduledTime: at }, { DISPATCH_ENABLED: "false" }, offline)).status, "paused");
-  assert.equal((await onClock({ scheduledTime: at + 60000 }, env, offline)).status, "held");
+  assert.equal((await onClock({ cron: CLOCK_CRONS.sync, scheduledTime: at }, { DISPATCH_ENABLED: "false" }, offline)).status, "paused");
+  assert.equal((await onClock({ cron: "* * * * *", scheduledTime: at }, env, offline)).status, "held");
 });
 
 test("a scheduled tick makes one scoped API request and returns its actual run identity", async () => {
   let calls = 0;
-  const result = await onClock({ scheduledTime: at }, env, async (url, options) => {
+  const result = await onClock({ cron: CLOCK_CRONS.sync, scheduledTime: at }, env, async (url, options) => {
     calls++;
     assert.equal(url, "https://api.github.com/repos/Rituxi/CF-DNSPod-Sync/actions/workflows/sync.yml/dispatches");
     assert.equal(options.method, "POST"); assert.equal(options.redirect, "manual");
@@ -39,12 +41,21 @@ test("a scheduled tick makes one scoped API request and returns its actual run i
 
 test("a temporary clock delivery check can only start frozen sync and obeys pause", async () => {
   const validation = { ...env, CLOCK_VALIDATE_FROZEN_SYNC: "true" };
-  const result = await onClock({ scheduledTime: at + 60000 }, validation, async (_url, options) => {
+  const result = await onClock({ cron: "* * * * *", scheduledTime: at + 60000 }, validation, async (_url, options) => {
     const { inputs } = JSON.parse(options.body);
     assert.equal(inputs.mode, "frozen"); assert.equal(inputs.trigger_source, "clock-validation"); return Response.json(run);
   });
   assert.equal(result.task, "sync");
-  assert.equal((await onClock({ scheduledTime: at }, { ...validation, DISPATCH_ENABLED: "false" }, () => assert.fail("Paused clock must stay offline"))).status, "paused");
+  assert.equal((await onClock({ cron: "* * * * *", scheduledTime: at }, { ...validation, DISPATCH_ENABLED: "false" }, () => assert.fail("Paused clock must stay offline"))).status, "paused");
+});
+
+test("cron identity selects the right job even when its timestamp is early or delayed", async () => {
+  for (const [task, cron] of Object.entries(CLOCK_CRONS)) for (const timestamp of [at - 2300, at + 7 * 60000]) {
+    await onClock({ cron, scheduledTime: timestamp }, env, async (url, options) => {
+      assert.ok(url.endsWith(`/${task}.yml/dispatches`));
+      assert.equal(JSON.parse(options.body).inputs.scheduled_at, new Date(timestamp).toISOString()); return Response.json(run);
+    });
+  }
 });
 
 test("probe dispatch carries boolean freeze inputs and a separate validation source", async () => {

@@ -14,6 +14,7 @@
     "pause": "node --use-env-proxy scripts/publication.mjs freeze",
     "resume": "node --use-env-proxy scripts/publication.mjs resume",
     "status": "node --use-env-proxy scripts/publication.mjs status",
+    "trigger:token": "node --use-env-proxy scripts/publish-trigger-token.mjs",
     "deploy:dry-run": "node --use-env-proxy scripts/deploy.mjs sync --dry-run && node --use-env-proxy scripts/deploy.mjs test --dry-run && node --use-env-proxy scripts/deploy.mjs probe --dry-run && node --use-env-proxy scripts/deploy.mjs trigger --dry-run",
     "deploy": "node --use-env-proxy scripts/deploy.mjs sync",
     "deploy:test": "node --use-env-proxy scripts/deploy.mjs test",

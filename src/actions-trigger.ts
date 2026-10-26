@@ -2,12 +2,7 @@
 export interface TriggerEnv { GITHUB_DISPATCH_TOKEN?: string; DISPATCH_ENABLED: string; CLOCK_VALIDATE_FROZEN_SYNC?: string }
 export type TriggerTask = "sync" | "probe";
 const REPOSITORY = "Rituxi/CF-DNSPod-Sync";
-export const TRIGGER_CRON = "3,10,25,33,40,55 * * * *";
-export function dueTask(scheduledTime: number): TriggerTask | null {
-  if (!Number.isFinite(scheduledTime)) throw new Error("Invalid scheduled time");
-  const minute = new Date(scheduledTime).getUTCMinutes();
-  return [3, 33].includes(minute) ? "sync" : [10, 25, 40, 55].includes(minute) ? "probe" : null;
-}
+export const CLOCK_CRONS = { sync: "3,33 * * * *", probe: "10,25,40,55 * * * *" } as const;
 export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduledTime: number,
   options: { frozen?: boolean; validation?: boolean; fetcher?: typeof fetch } = {}) {
   if (!["sync", "probe"].includes(task)) throw new Error("Unsupported trigger task");
@@ -31,17 +26,19 @@ export async function dispatchTask(env: TriggerEnv, task: TriggerTask, scheduled
   return { status: "dispatched", task, scheduledAt, triggerSource: inputs.trigger_source,
     runId: result.workflow_run_id, runUrl: result.html_url, dnsWrites: false };
 }
-export async function onClock(event: { scheduledTime: number }, env: TriggerEnv, fetcher?: typeof fetch) {
+export async function onClock(event: { cron: string; scheduledTime: number }, env: TriggerEnv, fetcher?: typeof fetch) {
   if (env.DISPATCH_ENABLED !== "true") return { status: "paused", dnsWrites: false };
   if (env.CLOCK_VALIDATE_FROZEN_SYNC === "true") {
     return dispatchTask(env, "sync", event.scheduledTime, { frozen: true, validation: true, fetcher });
   }
-  const task = dueTask(event.scheduledTime);
-  if (!task) return { status: "held", reason: "not-a-configured-minute", dnsWrites: false };
+  // Route by the expression supplied by Cloudflare, not a timestamp that may be
+  // shifted by delivery jitter or an explicitly chosen diagnostic time.
+  const task = event.cron === CLOCK_CRONS.sync ? "sync" : event.cron === CLOCK_CRONS.probe ? "probe" : null;
+  if (!task) return { status: "held", reason: "not-a-configured-cron", dnsWrites: false };
   return dispatchTask(env, task, event.scheduledTime, { fetcher });
 }
 export default {
-  async scheduled(event: { scheduledTime: number }, env: TriggerEnv): Promise<void> {
+  async scheduled(event: { cron: string; scheduledTime: number }, env: TriggerEnv): Promise<void> {
     console.log(JSON.stringify({ event: "actions-clock", ...await onClock(event, env) }));
   },
   async fetch(request: Request, env: TriggerEnv): Promise<Response> {

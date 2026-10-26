@@ -10,7 +10,7 @@ GitHub Actions 运行现有 Node 入口，抓取候选、调度真实大陆三�
 | --- | --- | --- |
 | Actions `DNSPod sync` | 来源、候选、权威回读、历史决策、DNSPod 发布及验证；唯一自动 DNS 写入方 | 每小时 03、33 分 |
 | Actions `Three-carrier probe` | 通过 Globalping 调度大陆电信 AS4134、联通 AS4837、移动 AS9808，每家 3 个实际探针 | 每小时 10、25、40、55 分 |
-| `cf-dnspod-actions-trigger` | 一个 Cron、每次一个 GitHub API 请求；只启动上述两工作流，返回实际运行 ID | 03、10、25、33、40、55 分 |
+| `cf-dnspod-actions-trigger` | 两条 Cron、每次一个 GitHub API 请求；按 Cron 表达式识别对应任务，返回实际运行 ID | 同步 03/33 分，探测 10/25/40/55 分 |
 | `cf-ipv4-test` | `https://probe.luro.qzz.io/health` 固定 HTTPS 响应 | 无 Cron |
 | `cf-dnspod-state` | 权威快照、候选、近 48 小时报告、租约、冻结和切换审计 | 原有独立 D1 |
 
@@ -40,7 +40,7 @@ GitHub 服务器只负责抓取网页、请求 API 和决策，测速始终发�
 
 GitHub 原生定时曾没有生成运行事件，现改由轻量时钟调用 `workflow_dispatch`。GitHub runner 仍可能排队；35 分钟快照和 6 小时证据时效不放宽。快照过期就跳过探测、保持 DNS，不补跑漏掉的时段。启动请求不自动重试，结果不明时依靠下一周期和原 D1 去重恢复。摘要保留时钟时间与触发来源，可核查投递及排队延迟。手动/API 触发不依赖原生定时的 60 天活动规则。
 
-本仓库只用标准 `ubuntu-24.04` 托管 runner；[公开仓库标准 runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。每天计划 48 次同步、96 次探测，不受私有仓库每月 2,000 分钟配额约束。不使用付费大型 runner，不上传 artifacts、不启用缓存。时钟每天约 144 次调用、只占一个 Cron，低于 [Workers Free 的每天 10 万请求和 5 个 Cron](https://developers.cloudflare.com/workers/platform/limits/)，不抓网页、不读 D1、不签 DNS 请求、不轮询探测结果；实际 CPU 验证见部署记录。D1 和 Globalping 沿用原预算。公开日志只输出白名单摘要，完整测量保存在工具 D1。
+本仓库只用标准 `ubuntu-24.04` 托管 runner；[公开仓库标准 runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)。每天计划 48 次同步、96 次探测，不受私有仓库每月 2,000 分钟配额约束。不使用付费大型 runner，不上传 artifacts、不启用缓存。时钟每天约 144 次调用、占两条 Cron；加上账户原有两条业务 Cron，共 4 条，低于 [Workers Free 的每天 10 万请求和 5 个 Cron](https://developers.cloudflare.com/workers/platform/limits/)。时钟不抓网页、不读 D1、不签 DNS 请求、不轮询探测结果；实际 CPU 验证见部署记录。D1 和 Globalping 沿用原预算。公开日志只输出白名单摘要，完整测量保存在工具 D1。
 
 ## 配置与操作
 
@@ -57,6 +57,8 @@ Actions 仓库变量：`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`。�
 探测工作流只接收 D1 token，不接收腾讯云凭据。Cloudflare D1 token 的权限范围是选定账户，代码额外限制为配置的工具数据库；不要把业务数据库 ID 填入变量。腾讯云策略模板见 [dnspod-policy.json](docs/dnspod-policy.json)。不要将密钥贴到聊天、日志或仓库中。
 
 时钟另用一个仅限本仓库 `Actions: write` 的 GitHub fine-grained token，保存在它的 Cloudflare Secret `GITHUB_DISPATCH_TOKEN` 中；没有代码写入、DNS 或 D1 权限。可通过 `scripts/set-trigger-token.ps1` 隐藏输入到本机忽略目录。维护者需要在令牌到期前更新该 Secret，不能上传本机 GCM 的完整登录凭据。`POST /dispatch` 是用同一专用令牌鉴权的主动链路验证入口，只允许触发必须冻结的同步或探测。
+
+轮换时钟令牌时，先运行 `pwsh -File scripts/set-trigger-token.ps1`，再运行 `npm run trigger:token`。本机命令使用已配置的工具账户和 Wrangler profile，仅更新该时钟的加密 Secret，不改业务凭据。临时的 `CLOCK_VALIDATE_FROZEN_SYNC=true` 仅用于真实 Cron 投递诊断，强制启动冻结同步；正常配置没有此开关，验收后必须移除并恢复原 Cron。
 
 本机资源标识放在忽略文件 `.local/cloudflare-state.json`：`accountId`、`databaseId`、可选 `wranglerProfile`；也可设置同名用途的环境变量 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`WRANGLER_PROFILE`。本机 D1 可用现有 Wrangler profile 登录；Actions 只使用 API Token。腾讯云本机凭据仍由 `scripts/set-credentials.ps1` 隐藏输入并保存到忽略目录。
 
