@@ -19,7 +19,7 @@ export interface Measurement {
   carriers: { line: Line; name: string; asn: number; samples: number; successful: number; failed: number; collectionIssues: number; successfulP95Ms: number | null; failureCounts: Record<string, number> }[];
 }
 // The decision reader and comparison functions share this contract. Full reports
-// remain stored; adding a comparison input here also adds it to the D1 projection.
+// remain stored; adding a comparison input here also adds it to the Actions projection.
 export const COMPARISON_SAMPLE_KEYS = [
   "country", "asn", "state", "city", "network", "latitude", "longitude", "collectionIssue", "totalMs", "ok",
 ] as const;

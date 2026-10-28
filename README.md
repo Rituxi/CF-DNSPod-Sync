@@ -2,7 +2,7 @@
 
 运行流程只有一条：**轻量 Worker 定时触发 → GitHub Actions 抓取、实测、选址 → 工具 D1 保存证据 → 按规则更新 DNSPod**。
 
-2026-10-26 已按维护者明确授权解除发布冻结：继续按现有实测规则自动维护 `pick.luro.qzz.io` 的四条受管记录。正式业务接入需另行验收。[实际验证记录](docs/deployment-and-acceptance.md) · [ITDOG 复测](docs/itdog-acceptance.md)
+2026-10-26 已按维护者明确授权解除发布冻结：继续按现有实测规则自动维护 `pick.luro.qzz.io` 的四条受管记录。正式 Luro 域名随后已在业务项目接入该地址池；配置归属与验证边界见[部署验收记录](docs/deployment-and-acceptance.md#正式-luro-入口接入2026-10-26) · [ITDOG 复测](docs/itdog-acceptance.md)。
 
 ## 当前架构
 
@@ -39,6 +39,8 @@ GitHub 服务器负责抓取和调度，三网测速发生在真实运营商探�
 保留 10 秒测量预算、20 秒首次轮询等待、5 秒后续间隔、最多 20 次结果查询。首次完成结果及时落库，历史保留 48 小时。两个业务工作流共用 concurrency，运行中的任务不被新任务取消；D1 同时负责租约及去重。
 
 权威快照有效期 35 分钟、证据有效期 6 小时不放宽。延迟导致快照过期时跳过探测、保持 DNS，不追补漏掉的时段。摘要保留 `triggerSource` 和 `scheduledAt`，便于核对自动投递及排队时间。
+
+D1 按四条受管线路复用现有时间索引：选址每线只取最新两轮，预算只读最近一小时，清理只定位过期记录；测量 JSON 的比较字段在 Actions 内整理，避免 D1 展开虚拟表产生额外读行。不增加索引或写入，不改变频率、48 小时历史和发布规则。实测数据与维护注意事项见 [D1 读取优化](docs/d1-efficiency.md)。
 
 免费额度：[公开仓库标准 Actions runner 免费](https://docs.github.com/en/billing/concepts/product-billing/github-actions)，本项目只用 `ubuntu-24.04`，每天计划 48 次同步、96 次探测，不使用付费大型 runner、artifacts 或缓存。[Workers Free](https://developers.cloudflare.com/workers/platform/limits/) 每天 10 万请求、账户共 5 条 Cron；本工具时钟约 144 次调用/天、2 条 Cron。[D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) 每天读 500 万行、写 10 万行、账户存储共 5GB；运行摘要报告实际行读写，需与账户其他数据库共用额度。[Globalping 匿名免费额度](https://globalping.io/credits)每出口 IP 每小时 250 次测试；每轮创建前读取实际余额并保留 18 次余量，共用 GitHub 出口额度不足就退避。
 

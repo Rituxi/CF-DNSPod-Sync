@@ -50,6 +50,27 @@ test("rolling budget includes manual jobs and aborted jobs; 429 reset persists",
     assert.equal((await new StateStore(d.db).control()).backoff_until, now + 3600_000);
   } finally { d.close(); }
 });
+
+test("indexed budget totals all four lines and incomplete rounds at the strict one-hour boundary", async () => {
+  const d = database();
+  try {
+    const states = allStates();
+    for (const [index, state] of states.entries()) {
+      await d.store.startRound(round(state, index, { startedAt: now - 60_000,
+        round: { status: index % 2 ? "partial" : "running", completedAt: undefined } }), 36);
+    }
+    await d.store.startRound(round(states[0], 10, { startedAt: now - 3600_000 + 1 }), 36);
+    await d.store.prioritize("DEFAULT", now);
+    const control = await d.store.control();
+    assert.equal(await d.store.claimRound(control, now, 36), null);
+    assert.deepEqual(await d.store.control(), control, "A rejected budget must not consume priority or the slot");
+    // At exactly one hour the oldest reservation leaves the rolling window.
+    const claim = await d.store.claimRound(control, now + 1, 36);
+    assert.equal(claim.line, "DEFAULT");
+    assert.equal((await d.store.control()).probe_cursor, control.probe_cursor);
+    await d.store.releaseProbe(claim.owner);
+  } finally { d.close(); }
+});
 test("publication attempts are unique, frozen writes stay blocked, and only 48-hour summaries are retained", async () => {
   const d = database();
   try {
@@ -82,6 +103,51 @@ test("decision reads keep only the latest two rounds per line and retain partial
     }
     assert.equal((await d.store.rounds(now)).length, 12);
   } finally { d.close(); }
+});
+
+test("indexed evidence includes the six-hour boundary and never skips newer incomplete or changed-baseline rounds", async () => {
+  const d = database();
+  try {
+    const states = allStates(), cutoff = now - POLICY.evidenceMaxAgeMs;
+    const items = states.flatMap(state => [cutoff - 1, cutoff, now - POLICY.slotMs].map((startedAt, index) =>
+      round(state, index, { startedAt, current: { failures: { CT: 1, CU: 1, CM: 1 } } })));
+    for (const state of states.slice(1)) items.push(round(state, 3, { startedAt: now - 1,
+      round: state.line === "CT" ? { status: "running", completedAt: undefined, reports: [] } :
+        state.line === "CU" ? { status: "partial", completedAt: now } : { baselineVersion: "changed", completedAt: now } }));
+    await seed(d.store, states, items);
+    const snapshot = await d.store.syncSnapshot(now), full = await d.store.latestRounds(now);
+    for (const state of states) {
+      const ids = snapshot.rounds.filter(item => item.line === state.line).map(item => item.id);
+      assert.deepEqual(ids, (state.line === "DEFAULT" ? [2, 1] : [3, 2]).map(index => `round-${state.line}-${index}`));
+      assert.deepEqual(decideLine(state, snapshot.rounds, now), decideLine(state, full, now));
+      assert.equal(decideLine(state, snapshot.rounds, now).kind, state.line === "DEFAULT" ? "switch" : "hold");
+    }
+    const history = await d.store.rounds(now);
+    assert.ok(history.every(item => item.startedAt >= cutoff));
+    assert.equal(history.filter(item => item.startedAt === cutoff).length, 4);
+  } finally { d.close(); }
+});
+
+test("both retention entry points preserve the exact cutoff across four lines and switch audits", async () => {
+  for (const combined of [false, true]) {
+    const d = database();
+    try {
+      const states = allStates(), cutoff = now - POLICY.retentionMs;
+      const items = states.flatMap(state => [cutoff - 1, cutoff, cutoff + 1].map((startedAt, index) => round(state, index, { startedAt })));
+      await seed(d.store, states, items);
+      for (const item of items) d.connection.prepare("INSERT INTO switch_history(id,line,at,status,body) VALUES(?,?,?,'verified','{}')")
+        .run(item.id, item.line, item.startedAt);
+      if (combined) {
+        const owner = await d.store.claimSync(now);
+        await d.store.saveLines(states, now, owner, true);
+        await d.store.releaseSync(owner);
+      } else await d.store.prune(now);
+      const expected = items.filter(item => item.startedAt >= cutoff).map(item => item.id).sort();
+      for (const table of ["probe_rounds", "switch_history"]) {
+        assert.deepEqual(d.connection.prepare(`SELECT id FROM ${table} ORDER BY id`).all().map(row => row.id), expected);
+      }
+    } finally { d.close(); }
+  }
 });
 test("additive lease migration preserves an existing frozen database and its evidence", async () => {
   const connection = new DatabaseSync(":memory:");

@@ -1,5 +1,17 @@
 # 部署与验收
 
+## 正式 Luro 入口接入（2026-10-26）
+
+16:25（UTC+8）经维护者另行授权，业务项目已将 `luro.928889.xyz` 从 Worker Custom Domain 改为灰云 `CNAME pick.luro.qzz.io`，以该主机名的精确 Worker Route 接回原 `luro-zone`。无需小程序发版、业务代码发布、数据库迁移、新代理 Worker 或 SaaS 订阅。维护者已明确接受自选 Cloudflare IP 接法有实测但无官方长期支持保障；不得描述为标准 SaaS CNAME / Apex Proxying。
+
+正式 DNS / Universal SSL 由 Cloudflare 的 XYZ Zone 管理，精确 Route 的唯一配置源是业务项目 `wrangler.jsonc`；详细接入、证书续期、回退命令及原始证据索引由 LuroZone 的 `docs/development-deployment.md` 维护。本工具只继续管理原四条 A 记录，不操作正式域名或业务资源。临时验证域名已在真机验收后移除。
+
+Google / Cloudflare 普通 DoH、腾讯 / 阿里 DoH 及三网 ECS 已返回 CNAME 和池内地址；普通 DNS 连接、HTTPS、Luro health、鉴权和定向 Worker Tail 通过。用户确认小程序同步成功、云端时间正确，恢复 49～50 秒、数据完整、图片正常；同期后台看到真实快照及 21 次附件读取均 200。该真机体验不能代替全国运营商解析验收。
+
+用户提供的 ITDOG 对照：普通 DNS 首轮 39/322 失败、平均 2.108 秒，约 40.01% 仍返回正式域名旧 IP；近时指定池域名 14/318、1.228 秒；再测普通 DNS 30/321、1.720 秒，旧 IP 比例降至 26.73%。仍有 ITDOG 节点或运营商 DNS 的旧缓存，普通 DNS 全国收敛及长期表现尚未验收；不同轮节点和时间不同，不承诺失败固定为 11 或 14。
+
+接入窗口未冻结发布、未强制换 IP、未放宽规则；同步 / 探测频率、两轮判定、冷却和预算均保持。16:26 探测和 16:33 同步正常完成，四条线路未因本次接入被手动改写。下面“解除冻结”章节中的范围说明是其原阶段记录，不代表本次接入后仍未切换正式入口。
+
 ## 当前状态（2026-10-26，UTC+8）
 
 当前流程为轻量 Cloudflare 时钟 → Actions Node 入口 → 原工具 D1 / DNSPod。同步每 30 分钟、探测每 15 分钟。网页抓取、候选、实际三网探测调度、历史比较及 DNSPod 更新全部在 Actions；测试 Worker 独立保留。

@@ -1,4 +1,4 @@
-import { POLICY, type Line } from "./config.ts";
+import { LINES, POLICY, type Line } from "./config.ts";
 import { type Candidate } from "./sources.ts";
 import { type DnsRecord } from "./dnspod.ts";
 import { COMPARISON_SAMPLE_KEYS, type Measurement, type ComparisonMeasurement } from "./measurement.ts";
@@ -42,20 +42,26 @@ export class LeaseLostError extends Error {
   constructor() { super("Tool state lease expired or belongs to another invocation"); }
 }
 
-const latestRoundsSql = (projection: string) => `SELECT ${projection} FROM (
-  SELECT body,started_at,ROW_NUMBER() OVER (PARTITION BY line ORDER BY started_at DESC) position
-  FROM probe_rounds WHERE started_at>=?
-) WHERE position<=? ORDER BY started_at DESC`;
-const LATEST_ROUNDS_SQL = latestRoundsSql("body");
-// D1's binding otherwise transports escaped full JSON, then parses it a second
-// time in the caller. Project only the comparison view on the database side;
-// persisted reports and the full diagnostic readers are unchanged.
-const jsonFields = (value: string, keys: readonly string[]) => keys.map(key =>
-  `'${key}',${key === "ok" ? `json(${value} -> '$.${key}')` : `json_extract(${value},'$.${key}')`}`).join(",");
-const DECISION_ROUNDS_SQL = latestRoundsSql(`json_object(${jsonFields("body", DECISION_ROUND_KEYS)},
-  'reports',(SELECT json_group_array(json_object(${jsonFields("r.value", ["target", "allocated"])},
-    'results',(SELECT json_group_array(json_object(${jsonFields("s.value", COMPARISON_SAMPLE_KEYS)}))
-      FROM json_each(r.value,'$.results') s))) FROM json_each(body,'$.reports') r)) body`);
+// Seek the existing (line, started_at) index separately and stop after two
+// rounds per line. A window function scans history before applying its limit.
+const LINE_IDS_SQL = LINES.map(line => `'${line.id}'`).join(",");
+const LATEST_ROUNDS_SQL = `SELECT body FROM (${LINES.map(line => `SELECT * FROM (
+  SELECT body,started_at FROM probe_rounds WHERE line='${line.id}' AND started_at>=?
+  ORDER BY started_at DESC LIMIT ?
+)`).join(" UNION ALL ")}) ORDER BY started_at DESC`;
+const latestRoundsValues = (now: number) => LINES.flatMap(() => [now - POLICY.evidenceMaxAgeMs, POLICY.winsRequired]);
+// JSON virtual-table rows also count as D1 reads. Actions can cheaply project
+// the bounded eight rounds after fetching them; full diagnostics stay stored.
+function pick<T, K extends keyof T>(value: T, keys: readonly K[]): Pick<T, K> {
+  return Object.fromEntries(keys.map(key => [key, value[key]])) as Pick<T, K>;
+}
+function decisionRound(body: string): DecisionRound {
+  const round: Round = JSON.parse(body);
+  return { ...pick(round, DECISION_ROUND_KEYS), reports: round.reports.map(report => ({
+    target: report.target, allocated: report.allocated,
+    results: report.results.map(sample => pick(sample, COMPARISON_SAMPLE_KEYS)),
+  })) };
+}
 const UNSETTLED_SWITCHES_SQL = `SELECT h.id,h.line FROM switch_history h JOIN line_state l ON l.line=h.line
   WHERE h.status IN ('attempting','failed-or-unverified','cancelled')
   AND substr(h.id,1,length(l.line||':'||json_extract(l.body,'$.version')||':'))=l.line||':'||json_extract(l.body,'$.version')||':'`;
@@ -103,14 +109,14 @@ export class StateStore {
     return [
       ["SELECT * FROM tool_control WHERE id=1", []],
       ["SELECT body FROM line_state ORDER BY line", []],
-      [DECISION_ROUNDS_SQL, [now - POLICY.evidenceMaxAgeMs, POLICY.winsRequired]],
+      [LATEST_ROUNDS_SQL, latestRoundsValues(now)],
       [UNSETTLED_SWITCHES_SQL, []],
     ];
   }
   private syncResult([control, lines, rounds, unsettled]: DbResult[]): SyncSnapshot {
     if (control.results?.length !== 1) throw new Error("Tool state schema not initialized");
     return { control: control.results[0], lines: (lines.results ?? []).map(row => JSON.parse(row.body)),
-      rounds: (rounds.results ?? []).map(row => JSON.parse(row.body)), unsettled: unsettled.results ?? [] };
+      rounds: (rounds.results ?? []).map(row => decisionRound(row.body)), unsettled: unsettled.results ?? [] };
   }
   async syncSnapshot(now: number): Promise<SyncSnapshot> { return this.syncResult(await this.batch(this.syncStatements(now))); }
   async claimSyncSnapshot(now: number): Promise<{ owner: string; snapshot: SyncSnapshot } | null> {
@@ -132,7 +138,7 @@ export class StateStore {
   async saveLines(lines: LineState[], now: number, owner?: string, pruneExpired = false) {
     const statements = lines.map(line => this.lineStatement(line, now, owner));
     if (pruneExpired) for (const [table, column] of [["probe_rounds", "started_at"], ["switch_history", "at"]]) {
-      statements.push([`DELETE FROM ${table} WHERE ${column}<? AND (? IS NULL OR
+      statements.push([`DELETE FROM ${table} WHERE ${table === "probe_rounds" ? `line IN (${LINE_IDS_SQL}) AND ` : ""}${column}<? AND (? IS NULL OR
         EXISTS(SELECT 1 FROM tool_control WHERE id=1 AND sync_owner=? AND sync_lease_until>?))`,
         [now - POLICY.retentionMs, owner ?? null, owner ?? null, now]]);
     }
@@ -140,13 +146,13 @@ export class StateStore {
     if (results.slice(0, lines.length).some(result => result.results?.length !== 1)) throw new LeaseLostError();
   }
   async rounds(now: number): Promise<Round[]> {
-    return (await this.query("SELECT body FROM probe_rounds WHERE started_at>=? ORDER BY started_at DESC LIMIT 100", [now - POLICY.evidenceMaxAgeMs]))
+    return (await this.query(`SELECT body FROM probe_rounds WHERE line IN (${LINE_IDS_SQL}) AND started_at>=? ORDER BY started_at DESC,rowid LIMIT 100`, [now - POLICY.evidenceMaxAgeMs]))
       .map(row => JSON.parse(row.body));
   }
   async latestRounds(now: number): Promise<Round[]> {
     // Decisions need the latest two rounds per line, including partial rounds that break a streak.
     // Filter in D1 so every Cron does not parse six hours of full per-probe diagnostics.
-    return (await this.query(LATEST_ROUNDS_SQL, [now - POLICY.evidenceMaxAgeMs, POLICY.winsRequired]))
+    return (await this.query(LATEST_ROUNDS_SQL, latestRoundsValues(now)))
       .map(row => JSON.parse(row.body));
   }
   async claimSync(now: number): Promise<string | null> {
@@ -162,7 +168,7 @@ export class StateStore {
     const line = priority ? control.priority_line! : POLICY.rotation[control.probe_cursor % POLICY.rotation.length];
     const rows = await this.query(`UPDATE tool_control SET probe_cursor=probe_cursor+?,last_probe_slot=?,probe_lease_until=?,probe_owner=?,priority_line=NULL,priority_until=0
       WHERE id=1 AND probe_cursor=? AND priority_line IS ? AND priority_until=? AND last_probe_slot<? AND probe_lease_until<? AND backoff_until<=?
-      AND (SELECT COALESCE(SUM(reserved_tests),0) FROM probe_rounds WHERE started_at>?) + ? <= ? RETURNING id`,
+      AND (SELECT COALESCE(SUM(reserved_tests),0) FROM probe_rounds WHERE line IN (${LINE_IDS_SQL}) AND started_at>?) + ? <= ? RETURNING id`,
       [priority ? 0 : 1, slot, now + POLICY.leaseMs, owner, control.probe_cursor, control.priority_line, control.priority_until, slot, now, now, now - 3600_000, reserve, POLICY.hourlyProbeBudget]);
     return rows.length ? { id: `v2:${slot}:${line}`, line, slot, owner } : null;
   }
@@ -222,7 +228,7 @@ export class StateStore {
   }
   async prune(now: number) {
     await this.batch([
-      ["DELETE FROM probe_rounds WHERE started_at<?", [now - POLICY.retentionMs]],
+      [`DELETE FROM probe_rounds WHERE line IN (${LINE_IDS_SQL}) AND started_at<?`, [now - POLICY.retentionMs]],
       ["DELETE FROM switch_history WHERE at<?", [now - POLICY.retentionMs]],
     ]);
   }
