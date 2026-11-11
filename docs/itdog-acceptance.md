@@ -1,8 +1,24 @@
 # ITDOG 复测
 
-正式业务入口已在 2026-10-26 接入，见[业务接入记录](deployment-and-acceptance.md#正式-luro-入口接入2026-10-26)。验收普通用户链路时，用 `https://luro.928889.xyz/api/health`、运营商 DNS、**指定解析留空**；检查实际响应 IP、HTTPS 和 `service:luro-zone`。旧 IP `104.21.79.214` / `172.67.148.208` 仍出现时单独统计，不把缓存未收敛的结果当作纯优选线路表现，也不把所有失败归因于缓存。下面的测试 Worker 对照继续用于工具自身验证。
+共用地址池为 `pick.luro.qzz.io`，冻结会暂停该池的 IP 更新。[Luro 接入记录](deployment-and-acceptance.md#正式-luro-入口接入2026-10-26)
 
-日常查看效果保持正常自动运行，直接使用下面的两轮测试步骤即可，无需先冻结或等待 TTL。正式业务域名现在也接入了同一地址池，冻结会同时暂停其优选 IP 的自动切换。
+### 排查业务入口失败
+
+先选要排查的入口，用运营商 DNS，保持「指定解析」留空。检查 TLS、HTTP 200 和对应的 JSON 服务标识。
+
+| 入口 | 健康接口 | JSON 服务标识 |
+| --- | --- | --- |
+| Luro | `https://luro.928889.xyz/api/health` | `service: luro-zone` |
+| One 的小程序入口（橙云对照） | `https://api.rtxone.dpdns.org/health` | `data.service: rituxione` |
+| One 的优选 XYZ | `https://one.luro.928889.xyz/health` | `data.service: rituxione` |
+| 用药提醒的小程序入口 | `https://api.zbbj.dpdns.org/healthz` | `service: rituxi-reminder` |
+| 用药提醒的优选 XYZ | `https://remind.luro.928889.xyz/healthz` | `service: rituxi-reminder` |
+
+用 `npm run status` 查看各线路的当前 IP、候选地址和探测结果。`dnsUpdatedOn` 是 DNSPod 记录更新时间。最近回读和探测时间看 `lastAuthoritativeCheckAt` 与 `lastProbeCompletedAt`。
+
+若某条线路失败集中，在 ITDOG 保持业务 URL，分别固定当前 IP 和候选 IP。再用 `https://probe.luro.qzz.io/health` 固定当前 IP 对照。同 IP 的探测入口能通、业务入口持续失败时，优先核对业务域名的证书和路由。自动探测使用独立入口，业务可用性以各自 URL 的实测为准。
+
+### 严格对照地址池
 
 只有要做“同一组池内 IP”的严格近时对照，才先在 PowerShell 7 执行：
 
