@@ -37,7 +37,7 @@ export function rawMeasurement(target, options = {}) {
       result: { status: failed ? "failed" : "finished", ...(failed ? { failureSource: "target" } : {}),
         rawOutput: failed ? "curl: (7) Failed to connect to host" : "HTTP/2 200", statusCode: failed ? undefined : 200,
         tls: { authorized: true }, truncated: false, rawBody: '{"ok":true,"service":"cf-ipv4-test"}',
-        resolvedAddress: target === "probe.luro.qzz.io" ? "104.16.0.90" : target,
+        resolvedAddress: target === "probe.luroo.dpdns.org" ? "104.16.0.90" : target,
         timings: { total: options.latency ?? 500 }, ...options.result } };
   }));
   return { id: options.id ?? "measurement", target, status: "finished", results };
@@ -48,7 +48,7 @@ export function round(state, index = 0, options = {}) {
   return { id: `round-${state.line}-${index}`, slot: Math.floor(startedAt / POLICY.slotMs), line: state.line,
     baselineVersion: state.version, currentIp: state.record.Value, startedAt, completedAt: startedAt + 30_000,
     status: "measured", candidates: structuredClone(state.candidates), allocations: [], requestedTests: 36, errors: [],
-    reports: [measurement("probe.luro.qzz.io"), measurement(state.record.Value, options.current),
+    reports: [measurement("probe.luroo.dpdns.org"), measurement(state.record.Value, options.current),
       ...state.candidates.map(candidate => measurement(candidate.ip, options.challenger))], ...options.round };
 }
 export async function seed(store, states = allStates(), rounds = [], frozen = false) {

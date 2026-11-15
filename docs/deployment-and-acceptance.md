@@ -1,5 +1,15 @@
 # 部署与验收
 
+## 账户恢复迁移（2026-11-15）
+
+当前 Cloudflare 账户为 `dynayou@outlook.com`（`c13c966e9301402df85f57507ee54ed2`），本机 Wrangler profile 为 `lurozone-dynayou`。工具 D1 仍叫 `cf-dnspod-state`，新 ID 为 `785f57c4-3c38-4530-bd70-8323fcef56a7`；原库的 204 行与全部表结构已恢复并逐行比对。旧时钟已停止投递，迁移验证期间新库保持冻结。
+
+新地址池为 `pick.luroo.dpdns.org`（DNSPod 域名 ID `100285265`），四条线路及 IP 沿用迁移前状态，TTL 600。父域名由新 Cloudflare 账户托管，`pick` 通过 NS 委派至 DNSPod。DNSPod 仍是原微信登录账户，只更新工具子用户策略的目标域名。新测试入口为 `https://probe.luroo.dpdns.org/health`。
+
+Luro 的 `luro.928889.xyz` 直接 CNAME 至新池；One / Reminder 分别保留 `pick.rtxone.dpdns.org` / `pick.zbbj.dpdns.org` 第一跳，再指向新池。业务 URL 与 One issuer 均保持。新记录身份会建立新的权威基准；旧测量历史保留，但不会跨基准作为换址证据。GitHub Actions 使用新账户的专用 D1 token，本机管理令牌不上传 GitHub。
+
+下文为此前部署的时间点证据，其中旧账户、旧池与旧 D1 标识已由本节替代。
+
 ## 正式 Luro 入口接入（2026-10-26）
 
 16:25（UTC+8）经维护者另行授权，业务项目已将 `luro.928889.xyz` 从 Worker Custom Domain 改为灰云 `CNAME pick.luro.qzz.io`，以该主机名的精确 Worker Route 接回原 `luro-zone`。无需小程序发版、业务代码发布、数据库迁移、新代理 Worker 或 SaaS 订阅。维护者已明确接受自选 Cloudflare IP 接法有实测但无官方长期支持保障；不得描述为标准 SaaS CNAME / Apex Proxying。

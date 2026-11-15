@@ -1,13 +1,13 @@
 {
   "database": { "name": "cf-dnspod-state" },
   "sync": {
-    "DNSPOD_DOMAIN": "pick.luro.qzz.io",
-    "DNSPOD_DOMAIN_ID": "100181956",
+    "DNSPOD_DOMAIN": "pick.luroo.dpdns.org",
+    "DNSPOD_DOMAIN_ID": "100285265",
     "SYNC_MODE": "sync"
   },
   "probe": {
-    "TARGET_RECORD": "pick.luro.qzz.io",
-    "HEALTH_URL": "https://probe.luro.qzz.io/health",
+    "TARGET_RECORD": "pick.luroo.dpdns.org",
+    "HEALTH_URL": "https://probe.luroo.dpdns.org/health",
     "PROBE_MODE": "observe"
   }
 }

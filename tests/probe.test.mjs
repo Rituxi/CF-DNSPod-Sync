@@ -7,19 +7,19 @@ import { decideLine } from "../src/selection.ts";
 import { StateStore } from "../src/state.ts";
 import { now } from "./fixtures.mjs";
 import { database, seed, allStates, rawMeasurement, lineState, round } from "./state-fixtures.mjs";
-const env = { TARGET_RECORD: "pick.luro.qzz.io", HEALTH_URL: "https://probe.luro.qzz.io/health", PROBE_MODE: "observe" };
+const env = { TARGET_RECORD: "pick.luroo.dpdns.org", HEALTH_URL: "https://probe.luroo.dpdns.org/health", PROBE_MODE: "observe" };
 
 test("test service remains fixed/no-store; no forwarding or publicly callable execution endpoint", async () => {
   const response = await testWorker.fetch(new Request(env.HEALTH_URL));
   assert.equal(response.status, 200); assert.match(response.headers.get("cache-control"), /no-store/);
   assert.equal((await response.json()).service, "cf-ipv4-test");
-  assert.equal((await testWorker.fetch(new Request("https://probe.luro.qzz.io/apply"))).status, 404);
+  assert.equal((await testWorker.fetch(new Request("https://probe.luroo.dpdns.org/apply"))).status, 404);
   assert.equal((await testWorker.fetch(new Request(env.HEALTH_URL, { method: "POST" }))).status, 405);
 });
 test("the supported top-level 10-second timeout preserves HTTPS Host/SNI and reuses the baseline cohort", () => {
   const request = measurementRequest("104.16.0.1", env.HEALTH_URL);
   assert.equal(request.timeout, 10); assert.equal(request.measurementOptions.timeout, undefined);
-  assert.equal(request.measurementOptions.request.host, "probe.luro.qzz.io");
+  assert.equal(request.measurementOptions.request.host, "probe.luroo.dpdns.org");
   assert.equal(request.measurementOptions.request.path, "/health"); assert.equal(request.locations.length, 3);
   assert.equal(request.measurementOptions.ipVersion, undefined);
   assert.equal(measurementRequest("104.16.0.2", env.HEALTH_URL, { id: "first", count: 9 }).locations, "first");
@@ -48,7 +48,7 @@ async function fixture(options = {}) {
     const pending = options.pending || (options.pendingOne && id === "job4") || elapsed < (options.pendingUntilMs ?? 0);
     const data = rawMeasurement(request.target, { id, counts: options.counts,
       failures: request.target === lineState().record.Value ? { CU: 1 } : undefined,
-      result: options.offline && request.target !== "probe.luro.qzz.io" ? { status: "offline" } : undefined });
+      result: options.offline && request.target !== "probe.luroo.dpdns.org" ? { status: "offline" } : undefined });
     if (options.changedCity && jobs.size > 1 && id === "job3") data.results.find(row => row.probe.asn === 4837).probe.city = "DifferentCity";
     return Response.json({ ...data, status: pending ? "in-progress" : "finished" }, { headers: { etag: '"version1"' } });
   };

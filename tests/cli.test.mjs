@@ -83,7 +83,7 @@ test("a mismatched server-side database identity sends no SQL", async () => {
 
 test("Node configuration is independent of Worker deployment files", async () => {
   const sync = await loadRuntime(), probe = await loadRuntime("probe");
-  assert.equal(sync.vars.DNSPOD_DOMAIN, "pick.luro.qzz.io"); assert.equal(probe.vars.TARGET_RECORD, sync.vars.DNSPOD_DOMAIN);
+  assert.equal(sync.vars.DNSPOD_DOMAIN, "pick.luroo.dpdns.org"); assert.equal(probe.vars.TARGET_RECORD, sync.vars.DNSPOD_DOMAIN);
   assert.equal(sync.database.name, "cf-dnspod-state"); assert.deepEqual(sync.database, probe.database);
   await assert.rejects(loadRuntime("wrangler.jsonc"), /Node runtime/);
 });
