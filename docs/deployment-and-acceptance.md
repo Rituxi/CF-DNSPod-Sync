@@ -2,13 +2,17 @@
 
 ## 账户恢复迁移（2026-11-15）
 
-当前 Cloudflare 账户为 `dynayou@outlook.com`（`c13c966e9301402df85f57507ee54ed2`），本机 Wrangler profile 为 `lurozone-dynayou`。工具 D1 仍叫 `cf-dnspod-state`，新 ID 为 `785f57c4-3c38-4530-bd70-8323fcef56a7`；原库的 204 行与全部表结构已恢复并逐行比对。旧时钟已停止投递，迁移验证期间新库保持冻结。
+当前 Cloudflare 账户为 `dynayou@outlook.com`（`c13c966e9301402df85f57507ee54ed2`），本机 Wrangler profile 为 `lurozone-dynayou`。工具 D1 仍叫 `cf-dnspod-state`，新 ID 为 `785f57c4-3c38-4530-bd70-8323fcef56a7`；原库的 204 行与全部表结构已恢复并逐行比对。新库在冻结验证后已于 14:42 恢复原来的自动发布规则和 30/15 分钟周期，旧时钟已停用。两个 Wrangler 配置明确固定新账户，防止旧账户的 Git 构建重新部署旧时钟。
 
 新地址池为 `pick.luroo.dpdns.org`（DNSPod 域名 ID `100285265`），四条线路及 IP 沿用迁移前状态，TTL 600。父域名由新 Cloudflare 账户托管，`pick` 通过 NS 委派至 DNSPod。DNSPod 仍是原微信登录账户，只更新工具子用户策略的目标域名。新测试入口为 `https://probe.luroo.dpdns.org/health`。
 
 Luro 的 `luro.928889.xyz` 直接 CNAME 至新池；One / Reminder 分别保留 `pick.rtxone.dpdns.org` / `pick.zbbj.dpdns.org` 第一跳，再指向新池。业务 URL 与 One issuer 均保持。新记录身份会建立新的权威基准；旧测量历史保留，但不会跨基准作为换址证据。GitHub Actions 使用新账户的专用 D1 token，本机管理令牌不上传 GitHub。
 
 下文为此前部署的时间点证据，其中旧账户、旧池与旧 D1 标识已由本节替代。
+
+迁移代码 `12a623e` 的 [Linux CI](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/43686332547)、[冻结同步](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/43686336524)、[真实三网探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/43686403923) 通过，109 项检查无失败。恢复后的 [15:03 自动同步](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/43688215469) 与 `6949344` 的 [15:10 自动探测](https://github.com/Rituxi/CF-DNSPod-Sync/actions/runs/43688728930) 均完成；新基准尚未积累两轮可比证据时保持 IP，没有强制换址或放宽规则。
+
+16:20 已在新账户为两个现有 Worker 连接本仓库 `main`，构建 `npm run check`，部署分别用 `npx wrangler deploy --config wrangler.trigger.jsonc` / `wrangler.test.jsonc`，根目录 `/`，关闭分支预览。两个首次云端构建和部署均成功。构建使用独立的 Worker 部署 token，不含业务 D1/R2 或 DNSPod 凭据；正常定时仍由新时钟触发 Actions。
 
 ## 正式 Luro 入口接入（2026-10-26）
 
