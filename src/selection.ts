@@ -14,7 +14,7 @@ export function compareRound(round: DecisionRound, line: Line, candidateIp: stri
   if (round.status !== "measured") return { ...base, reason: "round-collection-incomplete" };
   const current = round.reports.find(report => report.target === round.currentIp);
   const challenger = round.reports.find(report => report.target === candidateIp);
-  const baseline = round.reports.find(report => report.target === "probe.luro.qzz.io");
+  const baseline = round.reports.find(report => report.target === "probe.luroo.dpdns.org");
   if (!current || !challenger || !baseline || !round.completedAt || round.errors.length) return base;
   const coverage = comparable([baseline, current, challenger], line);
   if (!coverage.ok) return { ...base, reason: coverage.reason };

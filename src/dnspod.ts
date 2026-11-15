@@ -42,7 +42,7 @@ export async function signRequest(secretId: string, secretKey: string, action: s
 
 export function validateEnv(env: DnsEnv): void {
   if (env.DNSPOD_DOMAIN !== DNS_CONFIG.domain || env.DNSPOD_DOMAIN_ID !== DNS_CONFIG.domainId ||
-    !["observe", "sync", "paused"].includes(env.SYNC_MODE)) throw new Error("Configuration must target the dedicated pick.luro.qzz.io test zone and a valid mode");
+    !["observe", "sync", "paused"].includes(env.SYNC_MODE)) throw new Error("Configuration must target the dedicated pick.luroo.dpdns.org test zone and a valid mode");
 }
 
 export class DnsPod {

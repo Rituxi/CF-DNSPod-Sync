@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { credentials, remoteState, loadRuntime } from "../scripts/runtime.mjs";
 import { cfRequest } from "../scripts/cloudflare-api.mjs";
 import { summarize } from "../scripts/report.mjs";
@@ -83,9 +86,48 @@ test("a mismatched server-side database identity sends no SQL", async () => {
 
 test("Node configuration is independent of Worker deployment files", async () => {
   const sync = await loadRuntime(), probe = await loadRuntime("probe");
-  assert.equal(sync.vars.DNSPOD_DOMAIN, "pick.luro.qzz.io"); assert.equal(probe.vars.TARGET_RECORD, sync.vars.DNSPOD_DOMAIN);
+  assert.equal(sync.vars.DNSPOD_DOMAIN, "pick.luroo.dpdns.org"); assert.equal(probe.vars.TARGET_RECORD, sync.vars.DNSPOD_DOMAIN);
   assert.equal(sync.database.name, "cf-dnspod-state"); assert.deepEqual(sync.database, probe.database);
   await assert.rejects(loadRuntime("wrangler.jsonc"), /Node runtime/);
+});
+
+test("local deployment rejects a stale account before invoking Wrangler and preserves valid production targets", () => {
+  const prefix = join(tmpdir(), "cf-dnspod-deploy-test-");
+  const root = mkdtempSync(prefix);
+  try {
+    mkdirSync(join(root, "scripts"));
+    mkdirSync(join(root, "node_modules/wrangler/bin"), { recursive: true });
+    writeFileSync(join(root, "package.json"), '{"type":"module"}');
+    for (const name of ["scripts/deploy.mjs", "scripts/resources.mjs", "wrangler.test.jsonc", "wrangler.trigger.jsonc"]) {
+      copyFileSync(new URL(`../${name}`, import.meta.url), join(root, name));
+    }
+    writeFileSync(join(root, "node_modules/wrangler/bin/wrangler.js"), `
+      import { readFileSync } from 'node:fs';
+      const args = process.argv.slice(2), config = JSON.parse(readFileSync(args[args.indexOf('--config') + 1], 'utf8'));
+      console.log(JSON.stringify({ args, account: config.account_id, worker: config.name, routes: config.routes }));
+    `);
+    const run = (target, account) => spawnSync(process.execPath, [join(root, "scripts/deploy.mjs"), target, "--dry-run"], {
+      encoding: "utf8", windowsHide: true, env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: account, WRANGLER_PROFILE: "deployment-test" },
+    });
+    for (const target of ["test", "trigger"]) {
+      const config = JSON.parse(readFileSync(join(root, `wrangler.${target}.jsonc`), "utf8"));
+      const blocked = run(target, "a".repeat(32));
+      assert.equal(blocked.status, 1);
+      assert.match(blocked.stderr, /Deployment account mismatch/);
+      assert.equal(blocked.stdout, "");
+      assert.equal(existsSync(join(root, `.local/deploy-${target}.json`)), false);
+      const allowed = run(target, config.account_id);
+      assert.equal(allowed.status, 0, allowed.stderr);
+      const deployed = JSON.parse(allowed.stdout);
+      assert.equal(deployed.account, config.account_id);
+      assert.equal(deployed.worker, config.name);
+      assert.deepEqual(deployed.routes, config.routes);
+      assert.equal(deployed.args.at(-1), "--dry-run");
+      assert.deepEqual(deployed.args.slice(-3, -1), ["--profile", "deployment-test"]);
+    }
+  } finally {
+    if (root.startsWith(prefix)) rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the retired ranking shortcut is rejected before any network request", () => {

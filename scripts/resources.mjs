@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
-// Identifiers are deployment configuration, not credentials. Keep this machine's
-// values outside Git; Actions supplies repository variables instead.
+// Node state access uses Actions repository variables or this machine's ignored
+// identifiers. Worker deployment must also match its pinned Wrangler account.
 let local = {};
 try { local = JSON.parse(await readFile(new URL("../.local/cloudflare-state.json", import.meta.url), "utf8")); }
 catch (error) { if (error.code !== "ENOENT") throw error; }

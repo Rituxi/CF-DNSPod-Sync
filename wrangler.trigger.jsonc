@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
+  "account_id": "c13c966e9301402df85f57507ee54ed2",
   "name": "cf-dnspod-actions-trigger",
   "main": "src/actions-trigger.ts",
   "compatibility_date": "2026-10-25",

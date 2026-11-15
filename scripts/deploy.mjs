@@ -7,7 +7,9 @@ const files = { test: "wrangler.test.jsonc", trigger: "wrangler.trigger.jsonc" }
 if (!Object.hasOwn(files, target) || process.argv.slice(3).some(arg => arg !== "--dry-run")) throw new Error("Use deploy.mjs test|trigger [--dry-run]");
 if (!ACCOUNT) throw new Error("Missing CLOUDFLARE_ACCOUNT_ID deployment configuration");
 const config = JSON.parse(await readFile(new URL(`../${files[target]}`, import.meta.url), "utf8"));
-config.account_id = ACCOUNT;
+if (config.account_id !== ACCOUNT) {
+  throw new Error(`Deployment account mismatch. Match CLOUDFLARE_ACCOUNT_ID or .local/cloudflare-state.json to account_id in ${files[target]}`);
+}
 const directory = new URL("../.local/", import.meta.url); await mkdir(directory, { recursive: true });
 config.main = fileURLToPath(new URL(`../${config.main}`, import.meta.url));
 delete config.$schema;

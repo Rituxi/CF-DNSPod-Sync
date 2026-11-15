@@ -3,7 +3,7 @@ import { CARRIERS } from "./measurement.ts";
 import { ipv4Number, readLimitedText, type Fetcher } from "./network.ts";
 export const GLOBALPING_API = "https://api.globalping.io/v1";
 export function measurementRequest(target: string, healthUrl: string, reuse?: { id: string; count: number }) {
-  if (healthUrl !== "https://probe.luro.qzz.io/health") throw new Error("Probe is restricted to the independent test health URL");
+  if (healthUrl !== "https://probe.luroo.dpdns.org/health") throw new Error("Probe is restricted to the independent test health URL");
   const health = new URL(healthUrl);
   if (target !== health.hostname) ipv4Number(target);
   return { type: "http", target, timeout: POLICY.probeTimeoutSeconds,

@@ -2,7 +2,7 @@
 
 运行流程只有一条：**轻量 Worker 定时触发 → GitHub Actions 抓取、实测、选址 → 工具 D1 保存证据 → 按规则更新 DNSPod**。
 
-2026-10-26 已按维护者明确授权解除发布冻结：继续按现有实测规则自动维护 `pick.luro.qzz.io` 的四条受管记录。正式 Luro 域名随后已在业务项目接入该地址池；配置归属与验证边界见[部署验收记录](docs/deployment-and-acceptance.md#正式-luro-入口接入2026-10-26) · [ITDOG 复测](docs/itdog-acceptance.md)。
+2026-11-15 因原 Google 登录账号失效，工具迁入 `dynayou@outlook.com` 的 Cloudflare 账户，地址池改为 `pick.luroo.dpdns.org`。四线 IP 和选址规则保持，原工具 D1 的全部状态与历史迁入新库。Luro、One 和用药提醒继续使用原业务域名。配置归属与验证边界见[部署验收记录](docs/deployment-and-acceptance.md) · [ITDOG 复测](docs/itdog-acceptance.md)。
 
 ## 当前架构
 
@@ -11,8 +11,8 @@
 | `cf-dnspod-actions-trigger` | 仅向本仓库发送一个工作流启动请求，不运行后台业务 | 同步 03/33 分；探测 10/25/40/55 分 |
 | Actions `DNSPod sync` / `run.mjs` | 网页抓取、候选、权威回读、历史选址、DNSPod 更新及验证 | 每 30 分钟 |
 | Actions `Three-carrier probe` / `probe.mjs` | 调度 Globalping 真实大陆电信 AS4134、联通 AS4837、移动 AS9808 探针 | 每 15 分钟 |
-| D1 `cf-dnspod-state` | 原有候选、权威快照、测量历史、冻结、租约、预算及切换审计 | 沿用原库 |
-| `cf-ipv4-test` | 独立 `https://probe.luro.qzz.io/health`，提供固定正确 JSON | 无 Cron |
+| D1 `cf-dnspod-state` | 原有候选、权威快照、测量历史、冻结、租约、预算及切换审计 | 新账户专库，保留原历史 |
+| `cf-ipv4-test` | 独立 `https://probe.luroo.dpdns.org/health`，提供固定正确 JSON | 无 Cron |
 
 GitHub 服务器负责抓取和调度，三网测速发生在真实运营商探针上。两个旧后台 Worker 已删除；业务工作流只接受 `workflow_dispatch`，定时入口统一由轻量 Worker 负责，保持 30/15 分钟频率。实际启动时间可能因 Cloudflare 投递或 GitHub 排队而后移。
 
@@ -30,7 +30,7 @@ GitHub 服务器负责抓取和调度，三网测速发生在真实运营商探�
 4. 最近 6 小时，同候选、同权威基准连续两轮完整可比测量，每轮失败更少才允许切换。平手保持。仅双方两轮均零失败、每轮 P95 同时改善至少 20% 和 100ms，才允许速度切换；默认线任一家失败数不能增加。所有发布入口均执行这套判定。
 5. 正常冷却 60 分钟。仅当前连续两轮多数失败，且同轮零失败的已验证备用仍在 2 小时内，才可绕过冷却。单节点失败不触发；优先复测仍共享预算。
 6. DNSPod 权威回读是基准。写前检查记录身份、IP、候选、时效及租约；冻结、最新两轮证据和发布意图原子检查。写后回读；异常或结果不明时重建基准、重新积累证据。
-7. 只管理 `pick.luro.qzz.io` 已初始化的 `@ A` 默认、电信、联通、移动四条记录，每条一个 IPv4、TTL 600、备注 `managed-by:cf-dnspod-sync`。证据不足、来源或测量失败就保持原 DNS，不按榜单直接发布，不迁移其他记录。
+7. 只管理 `pick.luroo.dpdns.org` 已初始化的 `@ A` 默认、电信、联通、移动四条记录，每条一个 IPv4、TTL 600、备注 `managed-by:cf-dnspod-sync`。证据不足、来源或测量失败就保持原 DNS，不按榜单直接发布，不迁移其他记录。
 
 ## 预算与延迟
 

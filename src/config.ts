@@ -14,7 +14,7 @@ export const SOURCE_CONFIG = {
   ],
 };
 export const DNS_CONFIG = {
-  domain: "pick.luro.qzz.io", domainId: "100181956", subdomain: "@", ttl: 600,
+  domain: "pick.luroo.dpdns.org", domainId: "100285265", subdomain: "@", ttl: 600,
   owner: "managed-by:cf-dnspod-sync",
 };
 export const TEST_SERVICE = "cf-ipv4-test";

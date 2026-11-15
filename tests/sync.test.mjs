@@ -8,7 +8,7 @@ import { env, now, record, transition, dnsLines, fixture } from "./fixtures.mjs"
 import { database, seed, lineState, allStates, round } from "./state-fixtures.mjs";
 
 test("Web Crypto TC3 agrees with Node crypto across a UTC day boundary", async () => {
-  const stamp = Math.floor(Date.parse("2026-10-25T00:05:00+08:00") / 1000), payload = '{"Domain":"pick.luro.qzz.io"}';
+  const stamp = Math.floor(Date.parse("2026-10-25T00:05:00+08:00") / 1000), payload = '{"Domain":"pick.luroo.dpdns.org"}';
   const hash = value => createHash("sha256").update(value).digest("hex"), mac = (key, value) => createHmac("sha256", key).update(value).digest();
   const scope = "2026-10-24/dnspod/tc3_request";
   const canonical = ["POST", "/", "", "content-type:application/json; charset=utf-8\nhost:dnspod.tencentcloudapi.com\n", "content-type;host", hash(payload)].join("\n");
